@@ -10,6 +10,7 @@ import base64
 import json
 import os
 import re
+import time
 from pathlib import Path
 from typing import Any, Callable
 
@@ -189,10 +190,16 @@ def llm_model() -> str:
     return os.getenv("WANDB_INFERENCE_MODEL", DEFAULT_LLM)
 
 
+LAST_LLM: dict = {}   # prompt/system/output/usage of the most recent call (for agent spans)
+
+
 def wandb_inference(prompt: str, system: str = "", max_tokens: int = 220) -> str | None:
     key = os.getenv("WANDB_API_KEY")
     if not (LLM_ON and key):
         return None
+    LAST_LLM.clear()
+    LAST_LLM.update(prompt=prompt, system=system, model=llm_model(), provider="wandb-inference",
+                    output=None, usage=None, t0=time.perf_counter())
     project = f"{os.getenv('WANDB_ENTITY', '')}/{os.getenv('WANDB_PROJECT', '')}".strip("/")
     try:
         r = httpx.post(WANDB_INFERENCE_URL, timeout=float(os.getenv("LLM_TIMEOUT", "8")),
@@ -201,7 +208,10 @@ def wandb_inference(prompt: str, system: str = "", max_tokens: int = 220) -> str
                              "messages": ([{"role": "system", "content": system}] if system else [])
                                          + [{"role": "user", "content": prompt}]})
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"]
+        body = r.json()
+        LAST_LLM.update(output=body["choices"][0]["message"]["content"], usage=body.get("usage"),
+                        latency_ms=int((time.perf_counter() - LAST_LLM["t0"]) * 1000))
+        return LAST_LLM["output"]
     except Exception as e:
         print(f"[wandb-inference] unavailable, falling back: {e}")
         return None

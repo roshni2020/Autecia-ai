@@ -2,7 +2,7 @@
 import time
 import uuid
 
-from . import bandit, memory
+from . import agent_trace, bandit, memory
 from .agents import intent as intent_agent
 from .agents import learning as learning_agent
 from .agents import perception as perception_agent
@@ -41,20 +41,46 @@ def process(con, req: ProcessReq) -> dict:
     profile = memory.get_profile(con, req.user_id)
     policy = bandit.load(con, req.user_id, profile.support_mode)
 
+    interaction_id = uuid.uuid4().hex[:12]
+    session_id = req.session_id or uuid.uuid4().hex[:8]
+
     analysis = _speech(req)
     obs = analysis.observations if analysis else None
     if obs and obs.transcript.strip() and obs.providers.get("asr", "client") != "client":
         req.transcript = obs.transcript          # server ASR is the primary path
-    perc = perception_agent.run(req, profile.camera_enabled, speech=obs)
-    query = f"{perc.transcript} {perception_agent.visual_summary(perc)}"
-    utterance = analysis.fused_embedding if analysis else None
-    memories = memory.search(con, req.user_id, query, k=3, utterance=utterance)
-    intents = intent_agent.run(perc, memories, profile.suggestion_count)
-    judgment = learning_agent.judge(perc, memories, [c.text for c in intents.candidates])
-    ranked = learning_agent.rerank(intents, perc, memories, policy, judgment)
 
-    interaction_id = uuid.uuid4().hex[:12]
-    session_id = req.session_id or uuid.uuid4().hex[:8]
+    with agent_trace.turn(session_id, req.user_id, req.transcript, "suggest") as t:
+        with agent_trace.subagent(t, "perception_agent", {"transcript": req.transcript,
+                                  "scene": req.scene_hint, "pointing": req.pointing_hint,
+                                  "speech": obs.model_dump(exclude={"words"}) if obs else None},
+                                  "Observable facts from speech + scene") as span:
+            perc = perception_agent.run(req, profile.camera_enabled, speech=obs)
+            span["output"] = perc.model_dump(exclude={"speech"})
+        query = f"{perc.transcript} {perception_agent.visual_summary(perc)}"
+        utterance = analysis.fused_embedding if analysis else None
+        memories = memory.search(con, req.user_id, query, k=3, utterance=utterance)
+        with agent_trace.subagent(t, "intent_agent", {"perception": perception_agent.summary(perc),
+                                  "memories": [m.confirmed_text for m in memories]},
+                                  "2-4 candidate meanings + none-fit") as span:
+            intents = intent_agent.run(perc, memories, profile.suggestion_count)
+            span["output"] = [c.text for c in intents.candidates]
+            from .integrations import LAST_LLM
+            if LAST_LLM.get("output") is not None:
+                agent_trace.llm_span(t, LAST_LLM["model"], LAST_LLM["provider"], LAST_LLM["prompt"],
+                                     LAST_LLM["system"], LAST_LLM["output"], LAST_LLM["usage"])
+        with agent_trace.subagent(t, "learning_agent", {"candidates": [c.text for c in intents.candidates],
+                                  "policy_version": policy.version},
+                                  "Memory retrieval + contextual-bandit reranking") as span:
+            judgment = learning_agent.judge(perc, memories, [c.text for c in intents.candidates])
+            if judgment:
+                agent_trace.tool_span(t, "typesafe.system_one", {"question": "which candidate is meant"},
+                                      judgment)
+            ranked = learning_agent.rerank(intents, perc, memories, policy, judgment)
+            span["output"] = [{"text": c.text, "score": c.score} for c in ranked]
+        if t is not None:
+            import weave
+            t.record(output_messages=[weave.Message(role="assistant",
+                                                    content=f"Do you mean: {ranked[0].text}" if ranked else "")])
     latency_ms = int((time.perf_counter() - t0) * 1000)
 
     bus = [
@@ -150,9 +176,26 @@ def feedback(con, fb: FeedbackReq, learn: bool = True, remember: bool = True) ->
                           speech_summary=summary)
 
     from .schemas import Perception
-    refl = reflection_agent.run(shown["text"], confirmed, fb.accepted, fb.none_fit,
-                                Perception(**obs["perception"]), cands,
-                                obs["memory_matches"]).model_dump()
+    feedback_msg = ("accepted" if fb.accepted else "rejected") + (f": {confirmed}" if confirmed else " (none fit)")
+    with agent_trace.turn(row["session_id"] or fb.interaction_id, user_id, feedback_msg, "feedback") as t:
+        with agent_trace.subagent(t, "learning_agent", {"reward": reward, "shown": shown["text"],
+                                  "confirmed": confirmed},
+                                  "Reward + preference update of the per-user policy") as span:
+            span["output"] = {"policy_before": before, "policy_after": policy.as_dict(),
+                              "version": policy.version, "memory_saved": bool(confirmed)}
+        with agent_trace.subagent(t, "reflection_agent", {"prediction": shown["text"],
+                                  "confirmed": confirmed, "accepted": fb.accepted},
+                                  "Why the shown suggestion succeeded or failed") as span:
+            refl = reflection_agent.run(shown["text"], confirmed, fb.accepted, fb.none_fit,
+                                        Perception(**obs["perception"]), cands,
+                                        obs["memory_matches"]).model_dump()
+            if refl.get("reason_code") == "SYSTEM_ONE_JUDGMENT":
+                agent_trace.tool_span(t, "typesafe.system_one", {"question": "failure type"}, refl)
+            span["output"] = refl
+        if t is not None:
+            import weave
+            t.record(output_messages=[weave.Message(role="assistant",
+                                                    content=f"{refl['failure_type']}: {refl['recommendation']}")])
 
     record = {"interaction_id": fb.interaction_id, "accepted": fb.accepted,
               "rejected": not fb.accepted, "confirmed_text": confirmed, "reward": reward,
