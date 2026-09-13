@@ -82,12 +82,13 @@ Demo script (~90 s): pick a support mode → camera on with a book and a cup in 
 
 | Configuration | Top-1 | Top-3 | Avg reward | Clarification turns |
 | --- | --- | --- | --- | --- |
-| speech transcript only | 3% | 3% | −0.94 | 1.94 |
-| + vision | 21% | 26% | −0.58 | 1.52 |
-| + memory + vision | 32% | 49% | −0.36 | 1.19 |
-| **+ memory + vision + contextual bandit** | **35%** | 49% | **−0.31** | **1.16** |
+| speech transcript only | 3.2% | 3.2% | −0.94 | 1.94 |
+| + vision | 21.2% | 26.3% | −0.58 | 1.52 |
+| + memory | 16.8% | 41.2% | −0.66 | 1.42 |
+| + memory + vision (frozen policy) | 36.4% | 49.6% | −0.27 | 1.14 |
+| **+ memory + vision + contextual bandit** | **36.4%** | **49.6%** | **−0.27** | **1.14** |
 
-The learning layer adds **+2.5–4.3 pts top-1** over the identical frozen system and reduces clarification turns. Two bugs were found *by* this harness and fixed: raw-feature bandit updates made RL worse than frozen (−17.6 pts) until an advantage baseline was used; generator misses were wrongly punishing the ranker. Results are logged as a W&B run; `python -m eval.weave_eval` publishes a `weave.Evaluation` (top-1, top-3, candidate count, latency) to the Weave Evals tab.
+Personalisation comes from confirmed memory: +15 pts top-1 and −0.4 clarification turns over vision alone. On this synthetic replay the contextual bandit's *extra* margin over the frozen policy is within noise (−0.1 to +0.4 pts across correction-step settings); its job in the live app is to learn how much to trust TypeSafe, memory and pointing for one person, which the replay's simulated users do not exercise. Three bugs were found *by* this harness and fixed: raw-feature bandit updates made RL worse than frozen (−17.6 pts) until an advantage baseline was used; generator misses were wrongly punishing the ranker; and corrected memories were being stored with the rejected action's −1, penalising the very sentence the user confirmed. Results are logged as a W&B run; `python -m eval.weave_eval` publishes a `weave.Evaluation` (top-1, top-3, candidate count, latency) to the Weave Evals tab.
 
 **Observability** — every live interaction is a Weave call tree (`echoloop.process` → `perception_agent.run` → `intent_agent.run` → `wandb_inference.chat` → `learning_agent.judge` (TypeSafe) → `learning_agent.rerank`; `echoloop.feedback` → `reflection_agent.run`), and the four agents appear as separate agents in the Weave Agents dashboard with per-step input/output messages, LLM token usage and tool spans.
 

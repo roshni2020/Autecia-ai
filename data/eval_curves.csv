@@ -12,58 +12,58 @@ configuration,turn_bucket,top1_accuracy
 1. speech transcript only,100,0.0425
 1. speech transcript only,110,0.0425
 1. speech transcript only,120,0.015
-2. speech + GeMAPS,0,0.095
+2. speech + GeMAPS,0,0.1025
 2. speech + GeMAPS,10,0.1225
-2. speech + GeMAPS,20,0.18
-2. speech + GeMAPS,30,0.1525
-2. speech + GeMAPS,40,0.175
-2. speech + GeMAPS,50,0.2275
-2. speech + GeMAPS,60,0.1725
-2. speech + GeMAPS,70,0.195
-2. speech + GeMAPS,80,0.16
-2. speech + GeMAPS,90,0.195
-2. speech + GeMAPS,100,0.18
+2. speech + GeMAPS,20,0.19
+2. speech + GeMAPS,30,0.1575
+2. speech + GeMAPS,40,0.17
+2. speech + GeMAPS,50,0.23
+2. speech + GeMAPS,60,0.17
+2. speech + GeMAPS,70,0.1625
+2. speech + GeMAPS,80,0.195
+2. speech + GeMAPS,90,0.1875
+2. speech + GeMAPS,100,0.195
 2. speech + GeMAPS,110,0.1825
 2. speech + GeMAPS,120,0.19
-3. speech + WavLM,0,0.095
+3. speech + WavLM,0,0.1025
 3. speech + WavLM,10,0.1225
-3. speech + WavLM,20,0.18
-3. speech + WavLM,30,0.1525
-3. speech + WavLM,40,0.175
-3. speech + WavLM,50,0.2275
-3. speech + WavLM,60,0.1725
-3. speech + WavLM,70,0.195
-3. speech + WavLM,80,0.16
-3. speech + WavLM,90,0.195
-3. speech + WavLM,100,0.18
+3. speech + WavLM,20,0.19
+3. speech + WavLM,30,0.1575
+3. speech + WavLM,40,0.17
+3. speech + WavLM,50,0.23
+3. speech + WavLM,60,0.17
+3. speech + WavLM,70,0.1625
+3. speech + WavLM,80,0.195
+3. speech + WavLM,90,0.1875
+3. speech + WavLM,100,0.195
 3. speech + WavLM,110,0.1825
 3. speech + WavLM,120,0.19
-4. speech + WavLM + GeMAPS,0,0.095
+4. speech + WavLM + GeMAPS,0,0.1025
 4. speech + WavLM + GeMAPS,10,0.1225
-4. speech + WavLM + GeMAPS,20,0.18
-4. speech + WavLM + GeMAPS,30,0.1525
-4. speech + WavLM + GeMAPS,40,0.175
-4. speech + WavLM + GeMAPS,50,0.2275
-4. speech + WavLM + GeMAPS,60,0.1725
-4. speech + WavLM + GeMAPS,70,0.195
-4. speech + WavLM + GeMAPS,80,0.16
-4. speech + WavLM + GeMAPS,90,0.195
-4. speech + WavLM + GeMAPS,100,0.18
+4. speech + WavLM + GeMAPS,20,0.19
+4. speech + WavLM + GeMAPS,30,0.1575
+4. speech + WavLM + GeMAPS,40,0.17
+4. speech + WavLM + GeMAPS,50,0.23
+4. speech + WavLM + GeMAPS,60,0.17
+4. speech + WavLM + GeMAPS,70,0.1625
+4. speech + WavLM + GeMAPS,80,0.195
+4. speech + WavLM + GeMAPS,90,0.1875
+4. speech + WavLM + GeMAPS,100,0.195
 4. speech + WavLM + GeMAPS,110,0.1825
 4. speech + WavLM + GeMAPS,120,0.19
-5. speech + memory,0,0.095
-5. speech + memory,10,0.125
-5. speech + memory,20,0.18
-5. speech + memory,30,0.1625
-5. speech + memory,40,0.17
-5. speech + memory,50,0.22
-5. speech + memory,60,0.15
-5. speech + memory,70,0.1675
-5. speech + memory,80,0.1525
-5. speech + memory,90,0.165
-5. speech + memory,100,0.175
-5. speech + memory,110,0.1725
-5. speech + memory,120,0.165
+5. speech + memory,0,0.1025
+5. speech + memory,10,0.1225
+5. speech + memory,20,0.195
+5. speech + memory,30,0.1525
+5. speech + memory,40,0.175
+5. speech + memory,50,0.2425
+5. speech + memory,60,0.165
+5. speech + memory,70,0.1575
+5. speech + memory,80,0.195
+5. speech + memory,90,0.185
+5. speech + memory,100,0.195
+5. speech + memory,110,0.1675
+5. speech + memory,120,0.17
 6. speech + vision,0,0.185
 6. speech + vision,10,0.23
 6. speech + vision,20,0.2075
@@ -77,29 +77,29 @@ configuration,turn_bucket,top1_accuracy
 6. speech + vision,100,0.1975
 6. speech + vision,110,0.2275
 6. speech + vision,120,0.19
-7. speech + memory + vision,0,0.235
-7. speech + memory + vision,10,0.29
-7. speech + memory + vision,20,0.315
-7. speech + memory + vision,30,0.3
-7. speech + memory + vision,40,0.2725
-7. speech + memory + vision,50,0.3425
-7. speech + memory + vision,60,0.31
-7. speech + memory + vision,70,0.3125
-7. speech + memory + vision,80,0.325
-7. speech + memory + vision,90,0.285
-7. speech + memory + vision,100,0.3
-7. speech + memory + vision,110,0.325
-7. speech + memory + vision,120,0.32
-8. speech + memory + vision + bandit,0,0.2525
-8. speech + memory + vision + bandit,10,0.3175
-8. speech + memory + vision + bandit,20,0.355
-8. speech + memory + vision + bandit,30,0.31
-8. speech + memory + vision + bandit,40,0.335
-8. speech + memory + vision + bandit,50,0.3725
-8. speech + memory + vision + bandit,60,0.3675
-8. speech + memory + vision + bandit,70,0.375
-8. speech + memory + vision + bandit,80,0.39
-8. speech + memory + vision + bandit,90,0.3475
-8. speech + memory + vision + bandit,100,0.335
-8. speech + memory + vision + bandit,110,0.3525
-8. speech + memory + vision + bandit,120,0.345
+7. speech + memory + vision,0,0.265
+7. speech + memory + vision,10,0.345
+7. speech + memory + vision,20,0.3875
+7. speech + memory + vision,30,0.3225
+7. speech + memory + vision,40,0.345
+7. speech + memory + vision,50,0.3675
+7. speech + memory + vision,60,0.355
+7. speech + memory + vision,70,0.3725
+7. speech + memory + vision,80,0.39
+7. speech + memory + vision,90,0.3375
+7. speech + memory + vision,100,0.3375
+7. speech + memory + vision,110,0.375
+7. speech + memory + vision,120,0.35
+8. speech + memory + vision + bandit,0,0.2675
+8. speech + memory + vision + bandit,10,0.3425
+8. speech + memory + vision + bandit,20,0.39
+8. speech + memory + vision + bandit,30,0.3175
+8. speech + memory + vision + bandit,40,0.34
+8. speech + memory + vision + bandit,50,0.375
+8. speech + memory + vision + bandit,60,0.3525
+8. speech + memory + vision + bandit,70,0.365
+8. speech + memory + vision + bandit,80,0.3825
+8. speech + memory + vision + bandit,90,0.3425
+8. speech + memory + vision + bandit,100,0.345
+8. speech + memory + vision + bandit,110,0.3675
+8. speech + memory + vision + bandit,120,0.35

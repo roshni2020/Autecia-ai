@@ -53,7 +53,7 @@ class Policy:
         self.updates += 1
         self.version += 1
 
-    def prefer(self, chosen: dict, shown: dict, alpha: float = ALPHA * 2.5) -> None:
+    def prefer(self, chosen: dict, shown: dict, alpha: float = ALPHA * 2) -> None:
         """Supervised preference step: chosen should outrank what we showed.
 
         An explicit correction is the highest-quality signal we get (spec §4), so
