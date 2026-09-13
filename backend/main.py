@@ -12,6 +12,8 @@ from .integrations import COMPANION_VOICE, status, tts, weave_init
 from .pipeline import feedback as run_feedback
 from .pipeline import process as run_process
 from .schemas import SUPPORT_MODES, FeedbackReq, ProcessReq, StartReq, SupportProfile
+from . import speech as speech_subsystem
+from .speech.audio import decode_data_url
 
 app = FastAPI(title="EchoLoop")
 con = memory.connect()
@@ -23,7 +25,30 @@ QUICK_PHRASES = ["I need a break.", "It is too loud.", "I want to leave.",
 
 @app.get("/api/status")
 def api_status():
-    return {"integrations": status(), "support_modes": SUPPORT_MODES}
+    return {"integrations": status(), "support_modes": SUPPORT_MODES,
+            "speech": speech_subsystem.status()}
+
+
+class SpeechReq(BaseModel):
+    audio: str                      # base64 data URL (webm/wav/mp3/m4a)
+    transcript_hint: str = ""
+
+
+@app.post("/api/speech/analyze")
+def speech_analyze(req: SpeechReq):
+    """Speech subsystem only: transcript, word timestamps, timing observations.
+    Embeddings stay server-side; only their sizes are reported."""
+    try:
+        data, suffix = decode_data_url(req.audio)
+    except Exception:
+        raise HTTPException(400, "audio must be a base64 data URL")
+    analysis = speech_subsystem.analyze_audio(data, suffix, transcript_hint=req.transcript_hint)
+    if analysis is None:
+        raise HTTPException(422, "audio could not be processed")
+    obs = analysis.observations
+    return {"transcript": obs.transcript, "word_timestamps": [w.model_dump() for w in obs.words],
+            "speech_observations": obs.model_dump(exclude={"words"}),
+            "speech_embedding": f"internal[{obs.fused_embedding_dim}]"}
 
 
 @app.get("/api/profile/{user_id}")
@@ -62,7 +87,7 @@ def start(req: StartReq):
 
 @app.post("/interaction/process")
 def process(req: ProcessReq):
-    if not req.transcript.strip():
+    if not req.transcript.strip() and not req.audio and not req.speech_features:
         raise HTTPException(400, "empty transcript")
     return run_process(con, req)
 

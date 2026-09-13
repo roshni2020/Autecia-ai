@@ -60,9 +60,45 @@ JSON messages (`message_type / from / to / payload`), assembled in [backend/pipe
 | Learning | [backend/agents/learning/](backend/agents/learning/) | retrieves confirmed memories, builds features, reranks, updates the policy. |
 | Reflection | [backend/agents/reflection/](backend/agents/reflection/) | labels why a turn succeeded or failed (`RANKING_ERROR`, `MISSING_CANDIDATE`, …). Recommends only — never overrides the user. |
 
+## Speech perception layer
+
+```
+MICROPHONE (browser MediaRecorder, webm/opus)
+    │
+    ▼  backend/speech/audio.py      ffmpeg (imageio-ffmpeg) → 16 kHz mono WAV, temp file, deleted after
+    ▼  backend/speech/vad.py        Silero VAD (energy fallback) → speech segments, pauses, boundaries
+    ▼  backend/speech/neurointent/  vendored NeuroIntent inference: Whisper base (+word timestamps),
+    │                               openSMILE GeMAPSv01b (62), RoBERTa-large CLS, FusionLayer [C,D,C−D,C×D]
+    │   fallbacks: whisper.py · prosody.py · text_encoder.py (own modules, same libraries)
+    ▼  backend/speech/speech_encoder.py   WavLM-base-plus (wav2vec2 fallback) pooled utterance embedding
+    ▼  backend/speech/fusion.py           text/speech/prosody/timing → one unit utterance vector
+    ▼  PERCEPTION AGENT   transcript kept raw (fillers, repeats), pause stats, fragmentation, objects, pointing
+    ▼  INTENT AGENT       sees the speech facts; proposes 2–4 meanings + "None of these"
+    ▼  LEARNING AGENT     memory + bandit; the utterance vector adds a `speech` similarity feature
+    ▼  USER  →  reward  →  memory + policy update  →  REFLECTION AGENT
+```
+
+Observable facts only: pauses, rate, fillers, pitch/energy statistics are signal features. Nothing maps
+them to emotion, state, trait or diagnosis, and no candidate is chosen without the user confirming.
+
+Configuration: `WHISPER_MODEL` (base → large-v3 or a fine-tuned CTranslate2 model), `SPEECH_ENCODER`,
+`TEXT_ENCODER`, `ECHOLOOP_NEUROINTENT=0` (skip the vendored path), `ECHOLOOP_SPEECH=0` (typed/browser only).
+Every stage is optional and lazy — no torch → Whisper/VAD/GeMAPS still run; no Whisper → typed input works.
+
+- `POST /api/speech/analyze` — transcript, word timestamps, timing observations (embeddings stay internal).
+- `POST /interaction/process` accepts `audio` (data URL) or precomputed `speech_features`.
+- `python -m data.preprocess_audio_dataset --manifest x.csv --source NAME` — normalised records per dataset
+  (speaker-level splits, provenance and license kept; TalkBank CHAT adapter; nothing auto-downloaded).
+- `python -m eval.run_eval --audio-dataset data/speech_records.jsonl` — speech-feature ablations
+  (transcript / +GeMAPS / +WavLM / +both / +memory / +vision / +bandit).
+- Tests: `python -m tests.test_speech` (conversion, VAD, Whisper, GeMAPS size, encoder, fusion, Perception).
+
+Third-party: `backend/speech/neurointent/` is copied unmodified from Autiz-NeuroIntent (devalshah-04),
+declared MIT — see its `NOTICE.md`. Its hiring-related intent classes and scores are not used.
+
 ## The learning loop
 
-Features per candidate: `base, memory, visual, history, pointing, brevity, bias`.
+Features per candidate: `base, memory, visual, history, pointing, brevity, speech, judgment, bias`.
 Score is `w · features`; weights are per user, seeded by support mode, persisted in SQLite.
 
 ```

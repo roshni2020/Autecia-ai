@@ -48,10 +48,14 @@ def features(c: Candidate, p: Perception, memories: list[MemoryHit],
     pointing = p.gesture.confidence if (
         p.gesture.target and p.gesture.target.lower() in c.text.lower()) else 0.0
     judged = judgment["probabilities"].get(c.text, 0.0) if judgment else 0.0
+    # Speech evidence: a memory whose *utterance sounded like this one* supports
+    # the candidate that matches its confirmed meaning.
+    speech = max([0.0] + [m.speech_similarity * cosine(ce, embed(m.confirmed_text))
+                          for m in memories if m.speech_similarity > 0])
     return {"base": c.base_score, "memory": round(mem_sim, 4), "visual": c.visual_support,
             "history": round(hist, 4), "pointing": round(pointing, 4),
             "brevity": round(1.0 / (1 + 0.15 * len(c.text.split())), 4),
-            "judgment": round(judged, 4), "bias": 1.0}
+            "speech": round(speech, 4), "judgment": round(judged, 4), "bias": 1.0}
 
 
 @op

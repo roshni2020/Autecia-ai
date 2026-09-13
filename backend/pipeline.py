@@ -9,6 +9,26 @@ from .agents import perception as perception_agent
 from .agents import reflection as reflection_agent
 from .integrations import log_trace
 from .schemas import AgentMessage, FeedbackReq, ProcessReq
+from .speech import analyze_audio
+from .speech.audio import decode_data_url
+from .speech.schemas import SpeechAnalysis
+
+
+def _speech(req: ProcessReq) -> SpeechAnalysis | None:
+    """Audio -> SpeechAnalysis. Precomputed features (datasets, eval) pass straight through."""
+    if req.audio:
+        try:
+            data, suffix = decode_data_url(req.audio)
+            return analyze_audio(data, suffix, transcript_hint=req.transcript)
+        except Exception as e:
+            print(f"[pipeline] speech analysis skipped: {e}")
+            return None
+    if req.speech_features:
+        try:
+            return SpeechAnalysis(**req.speech_features)
+        except Exception as e:
+            print(f"[pipeline] bad speech_features ignored: {e}")
+    return None
 
 
 def _msg(mtype, frm, to, payload) -> dict:
@@ -21,9 +41,14 @@ def process(con, req: ProcessReq) -> dict:
     profile = memory.get_profile(con, req.user_id)
     policy = bandit.load(con, req.user_id, profile.support_mode)
 
-    perc = perception_agent.run(req, profile.camera_enabled)
+    analysis = _speech(req)
+    obs = analysis.observations if analysis else None
+    if obs and obs.transcript.strip() and obs.providers.get("asr", "client") != "client":
+        req.transcript = obs.transcript          # server ASR is the primary path
+    perc = perception_agent.run(req, profile.camera_enabled, speech=obs)
     query = f"{perc.transcript} {perception_agent.visual_summary(perc)}"
-    memories = memory.search(con, req.user_id, query, k=3)
+    utterance = analysis.fused_embedding if analysis else None
+    memories = memory.search(con, req.user_id, query, k=3, utterance=utterance)
     intents = intent_agent.run(perc, memories, profile.suggestion_count)
     judgment = learning_agent.judge(perc, memories, [c.text for c in intents.candidates])
     ranked = learning_agent.rerank(intents, perc, memories, policy, judgment)
@@ -52,6 +77,8 @@ def process(con, req: ProcessReq) -> dict:
         "candidates": [c.model_dump() for c in ranked],
         "memory_matches": [m.model_dump() for m in memories],
         "judgment": judgment,
+        "speech": obs.model_dump(exclude={"words"}) if obs else None,
+        "utterance_embedding": utterance,        # derived vector only; audio is gone
         "policy_version": policy.version, "policy_weights": policy.as_dict(),
         "latency_ms": latency_ms,
     }
@@ -73,6 +100,7 @@ def process(con, req: ProcessReq) -> dict:
             "candidate_detail": [c.model_dump() for c in ranked],
             "top_candidate": ranked[0].text if ranked else None,
             "memory_matches": [m.model_dump() for m in memories],
+            "speech_observations": obs.model_dump() if obs else None,
             "judgment": judgment, "intent_provider": intent_agent.LAST_PROVIDER["name"],
             "trace_summary": trace_summary, "agent_messages": bus,
             "policy_version": policy.version, "policy_weights": policy.as_dict(),
@@ -114,8 +142,12 @@ def feedback(con, fb: FeedbackReq, learn: bool = True, remember: bool = True) ->
         bandit.save(con, user_id, policy)
 
     if confirmed and remember:
+        sp = obs.get("speech") or {}
+        summary = (f"{sp['vad']['pause_count']} pause(s), "
+                   f"{'fragmented' if sp.get('fragmented') else 'fluent'}") if sp else ""
         memory.add_memory(con, user_id, obs["transcript"], obs["visual_summary"],
-                          confirmed, reward)
+                          confirmed, reward, utterance_embedding=obs.get("utterance_embedding"),
+                          speech_summary=summary)
 
     from .schemas import Perception
     refl = reflection_agent.run(shown["text"], confirmed, fb.accepted, fb.none_fit,

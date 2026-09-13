@@ -6,14 +6,14 @@ when the user picks a different candidate). Weights persist per user.
 import json
 import numpy as np
 
-FEATURES = ["base", "memory", "visual", "history", "pointing", "brevity", "judgment", "bias"]
+FEATURES = ["base", "memory", "visual", "history", "pointing", "brevity", "speech", "judgment", "bias"]
 ALPHA = 0.12
 EXPLORE = 0.05  # epsilon-ish tie-break noise, off during evaluation
 
 # Priors per support mode: nudges, never a diagnosis (spec §1A).
 PRIORS = {
     "default":              dict(base=1.0, memory=0.8, visual=0.6, history=0.4,
-                                 pointing=0.5, brevity=0.1, judgment=0.8, bias=0.0),
+                                 pointing=0.5, brevity=0.1, speech=0.6, judgment=0.8, bias=0.0),
     "aphasia_word_finding": dict(visual=0.9, pointing=0.8, brevity=0.3),
     "cognitive_fatigue":    dict(memory=1.0, brevity=0.3),
     "aac":                  dict(memory=1.0, history=0.6),

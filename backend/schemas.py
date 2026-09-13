@@ -2,6 +2,8 @@
 from typing import Any, Literal, Optional
 from pydantic import BaseModel, Field
 
+from .speech.schemas import SpeechObservations
+
 SUPPORT_MODES = [
     "autism_neurodivergent",
     "speech_language",
@@ -59,6 +61,7 @@ class Perception(BaseModel):
     gesture: Gesture = Field(default_factory=Gesture)
     camera_enabled: bool = False
     perception_confidence: float = 0.0
+    speech: Optional[SpeechObservations] = None   # from backend/speech when audio was sent
 
 
 class Candidate(BaseModel):
@@ -82,6 +85,7 @@ class MemoryHit(BaseModel):
     similarity: float
     success_count: int = 0
     failure_count: int = 0
+    speech_similarity: float = 0.0   # fused-utterance cosine when both sides have one
 
 
 class Reflection(BaseModel):
@@ -114,6 +118,8 @@ class ProcessReq(BaseModel):
     frame: Optional[str] = None          # base64 data URL, optional
     scene_hint: list[str] = Field(default_factory=list)  # offline object fallback
     pointing_hint: Optional[str] = None
+    audio: Optional[str] = None            # base64 data URL of the recorded utterance
+    speech_features: Optional[dict] = None  # precomputed SpeechAnalysis (eval / datasets)
 
 
 class FeedbackReq(BaseModel):

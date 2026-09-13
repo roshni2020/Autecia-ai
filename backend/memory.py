@@ -12,6 +12,7 @@ from pathlib import Path
 import numpy as np
 
 from .embed import DIM, cosine, embed
+from .speech.fusion import cosine as speech_cosine
 from .schemas import MemoryHit, SupportProfile
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "echoloop.db"
@@ -34,11 +35,23 @@ CREATE INDEX IF NOT EXISTS mem_user ON memories(user_id);
 """
 
 
+MIGRATIONS = [  # additive columns for databases created before the speech subsystem
+    "ALTER TABLE memories ADD COLUMN utterance_embedding BLOB",
+    "ALTER TABLE memories ADD COLUMN speech_summary TEXT DEFAULT ''",
+]
+
+
 def connect(path: Path | str = DB_PATH) -> sqlite3.Connection:
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     con = sqlite3.connect(path, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.executescript(SCHEMA)
+    for stmt in MIGRATIONS:
+        try:
+            con.execute(stmt)
+        except sqlite3.OperationalError:
+            pass  # column already exists
+    con.commit()
     return con
 
 
@@ -59,40 +72,56 @@ def set_profile(con, user_id: str, profile: SupportProfile) -> None:
 # ---- confirmed memories ----------------------------------------------------
 
 def add_memory(con, user_id: str, fragment: str, visual_summary: str,
-               confirmed_text: str, reward: int) -> None:
-    """Only confirmed communications are stored (spec §13, §25)."""
+               confirmed_text: str, reward: int,
+               utterance_embedding: list[float] | None = None, speech_summary: str = "") -> None:
+    """Only confirmed communications are stored (spec §13, §25). Derived speech
+    features (fused utterance vector, timing summary) are kept; raw audio never is."""
     key = f"{fragment} {visual_summary}"
+    ue = np.asarray(utterance_embedding, dtype=np.float32).tobytes() if utterance_embedding else None
     row = con.execute(
         "SELECT id,success_count,failure_count FROM memories "
         "WHERE user_id=? AND confirmed_text=?", (user_id, confirmed_text)).fetchone()
     if row:
         col = "success_count" if reward >= 0 else "failure_count"
-        con.execute(f"UPDATE memories SET {col}={col}+1, timestamp=?, fragment=? "
-                    "WHERE id=?", (time.time(), fragment, row["id"]))
+        con.execute(f"UPDATE memories SET {col}={col}+1, timestamp=?, fragment=?, "
+                    "utterance_embedding=COALESCE(?, utterance_embedding), "
+                    "speech_summary=CASE WHEN ?='' THEN speech_summary ELSE ? END WHERE id=?",
+                    (time.time(), fragment, ue, speech_summary, speech_summary, row["id"]))
     else:
         con.execute(
             "INSERT INTO memories(user_id,fragment,visual_summary,confirmed_text,reward,"
-            "embedding,success_count,failure_count,timestamp) VALUES(?,?,?,?,?,?,?,?,?)",
+            "embedding,success_count,failure_count,timestamp,utterance_embedding,speech_summary)"
+            " VALUES(?,?,?,?,?,?,?,?,?,?,?)",
             (user_id, fragment, visual_summary, confirmed_text, reward,
              embed(key).tobytes(), 1 if reward >= 0 else 0, 0 if reward >= 0 else 1,
-             time.time()))
+             time.time(), ue, speech_summary))
     con.commit()
 
 
-def search(con, user_id: str, query: str, k: int = 3) -> list[MemoryHit]:
+def search(con, user_id: str, query: str, k: int = 3,
+           utterance: list[float] | None = None) -> list[MemoryHit]:
+    """Text-keyed retrieval (hashed embedding). When the current utterance has a
+    fused speech vector, each hit also carries its speech similarity; retrieval
+    order blends both so a same-sounding fragment can surface a memory."""
     rows = con.execute("SELECT * FROM memories WHERE user_id=?", (user_id,)).fetchall()
     if not rows:
         return []
     q = embed(query)
+    u = np.asarray(utterance, dtype=np.float32) if utterance else None
     scored = []
     for r in rows:
         e = np.frombuffer(r["embedding"], dtype=np.float32)
         if e.shape[0] != DIM:
             continue
+        ssim = 0.0
+        if u is not None and r["utterance_embedding"]:
+            m = np.frombuffer(r["utterance_embedding"], dtype=np.float32)
+            if m.shape == u.shape:
+                ssim = speech_cosine(u, m)
         scored.append(MemoryHit(fragment=r["fragment"], confirmed_text=r["confirmed_text"],
                                 similarity=cosine(q, e), success_count=r["success_count"],
-                                failure_count=r["failure_count"]))
-    scored.sort(key=lambda m: -m.similarity)
+                                failure_count=r["failure_count"], speech_similarity=round(ssim, 4)))
+    scored.sort(key=lambda m: -(m.similarity + 0.5 * m.speech_similarity))
     return scored[:k]
 
 

@@ -6,6 +6,7 @@ import re
 
 from ...integrations import gemini_frame, op
 from ...schemas import DetectedObject, Gesture, Perception, ProcessReq
+from ...speech.schemas import SpeechObservations
 
 FILLERS = {"um", "uh", "er", "hmm", "like", "eh"}
 INCOMPLETE_TAIL = re.compile(r"(\.\.\.|\bthat\b|\bthe\b|\ba\b|\bsome\b)\s*$", re.I)
@@ -16,8 +17,12 @@ def _repetition(words: list[str]) -> bool:
 
 
 @op
-def run(req: ProcessReq, camera_enabled: bool) -> Perception:
-    words = re.findall(r"[a-zA-Z']+", req.transcript.lower())
+def run(req: ProcessReq, camera_enabled: bool, speech: SpeechObservations | None = None) -> Perception:
+    """Observable facts from speech + scene. Speech observations (Whisper words,
+    VAD pauses, fillers, repetition) are used as given; nothing is inferred
+    about the person from them."""
+    transcript = speech.transcript if (speech and speech.transcript.strip()) else req.transcript
+    words = re.findall(r"[a-zA-Z']+", transcript.lower())
     objects: list[DetectedObject] = []
     gesture = Gesture()
 
@@ -36,21 +41,39 @@ def run(req: ProcessReq, camera_enabled: bool) -> Perception:
     fragment_len = len([w for w in words if w not in FILLERS])
     conf = min(0.95, 0.25 + 0.08 * fragment_len + (0.2 if objects else 0.0)
                + 0.15 * gesture.confidence)
+    pauses = req.pause_intervals
+    repetition = _repetition(words)
+    if speech is not None:
+        pauses = speech.vad.pause_intervals or pauses
+        repetition = repetition or speech.repetition_detected
+        if speech.asr_confidence:
+            conf = 0.7 * conf + 0.3 * speech.asr_confidence
 
     return Perception(
-        transcript=req.transcript,
-        pause_intervals=req.pause_intervals,
-        repetition_detected=_repetition(words),
+        transcript=transcript,
+        pause_intervals=pauses,
+        repetition_detected=repetition,
         objects=objects,
         gesture=gesture,
         camera_enabled=bool(camera_enabled and (vision or req.scene_hint)),
-        perception_confidence=round(conf, 2),
+        perception_confidence=round(min(0.95, conf), 2),
+        speech=speech,
     )
 
 
 def summary(p: Perception) -> str:
     bits = []
-    if p.pause_intervals or INCOMPLETE_TAIL.search(p.transcript) or len(p.transcript.split()) < 5:
+    if p.speech is not None:
+        s = p.speech
+        if s.fragmented:
+            bits.append("fragmented utterance")
+        if s.vad.pause_count:
+            bits.append(f"{s.vad.pause_count} long pause(s), longest {s.vad.longest_pause_ms} ms")
+        if s.filler_count:
+            bits.append(f"{s.filler_count} filler(s) kept")
+        if s.providers.get("asr", "").startswith("faster-whisper"):
+            bits.append(f"ASR confidence {int(s.asr_confidence * 100)}%")
+    elif p.pause_intervals or INCOMPLETE_TAIL.search(p.transcript) or len(p.transcript.split()) < 5:
         bits.append("incomplete speech detected")
     if p.repetition_detected:
         bits.append("repetition detected")

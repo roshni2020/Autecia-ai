@@ -4,14 +4,14 @@
   "n_test": 720,
   "ablations": [
     {
-      "name": "1. speech only",
+      "name": "1. speech transcript only",
       "n_test": 720,
       "top1": 0.03194444444444444,
       "top3": 0.03194444444444444,
       "candidate_coverage": 0.03194444444444444,
       "avg_reward": -0.9361111111111111,
       "clarification_burden": 1.9361111111111111,
-      "latency_ms_per_interaction": 2.1009802781110114,
+      "latency_ms_per_interaction": 2.505512638910861,
       "curve": {
         "0": 0.05,
         "1": 0.025,
@@ -29,17 +29,141 @@
       },
       "failure_counts": {
         "MISSING_CANDIDATE": 4810
-      }
+      },
+      "speech_features_available": false
     },
     {
-      "name": "2. speech + video",
+      "name": "2. speech + GeMAPS",
+      "n_test": 720,
+      "top1": 0.18611111111111112,
+      "top3": 0.4027777777777778,
+      "candidate_coverage": 0.4027777777777778,
+      "avg_reward": -0.6277777777777778,
+      "clarification_burden": 1.4111111111111112,
+      "latency_ms_per_interaction": 3.198425555779573,
+      "curve": {
+        "0": 0.095,
+        "1": 0.1225,
+        "2": 0.18,
+        "3": 0.1525,
+        "4": 0.175,
+        "5": 0.2275,
+        "6": 0.1725,
+        "7": 0.195,
+        "8": 0.16,
+        "9": 0.195,
+        "10": 0.18,
+        "11": 0.1825,
+        "12": 0.19
+      },
+      "failure_counts": {
+        "MISSING_CANDIDATE": 3186,
+        "RANKING_ERROR": 961
+      },
+      "speech_features_available": false,
+      "note": "no audio features in this dataset: identical to transcript-only + memory + bandit"
+    },
+    {
+      "name": "3. speech + WavLM",
+      "n_test": 720,
+      "top1": 0.18611111111111112,
+      "top3": 0.4027777777777778,
+      "candidate_coverage": 0.4027777777777778,
+      "avg_reward": -0.6277777777777778,
+      "clarification_burden": 1.4111111111111112,
+      "latency_ms_per_interaction": 3.3011480555918147,
+      "curve": {
+        "0": 0.095,
+        "1": 0.1225,
+        "2": 0.18,
+        "3": 0.1525,
+        "4": 0.175,
+        "5": 0.2275,
+        "6": 0.1725,
+        "7": 0.195,
+        "8": 0.16,
+        "9": 0.195,
+        "10": 0.18,
+        "11": 0.1825,
+        "12": 0.19
+      },
+      "failure_counts": {
+        "MISSING_CANDIDATE": 3186,
+        "RANKING_ERROR": 961
+      },
+      "speech_features_available": false,
+      "note": "no audio features in this dataset: identical to transcript-only + memory + bandit"
+    },
+    {
+      "name": "4. speech + WavLM + GeMAPS",
+      "n_test": 720,
+      "top1": 0.18611111111111112,
+      "top3": 0.4027777777777778,
+      "candidate_coverage": 0.4027777777777778,
+      "avg_reward": -0.6277777777777778,
+      "clarification_burden": 1.4111111111111112,
+      "latency_ms_per_interaction": 3.2766155554579908,
+      "curve": {
+        "0": 0.095,
+        "1": 0.1225,
+        "2": 0.18,
+        "3": 0.1525,
+        "4": 0.175,
+        "5": 0.2275,
+        "6": 0.1725,
+        "7": 0.195,
+        "8": 0.16,
+        "9": 0.195,
+        "10": 0.18,
+        "11": 0.1825,
+        "12": 0.19
+      },
+      "failure_counts": {
+        "MISSING_CANDIDATE": 3186,
+        "RANKING_ERROR": 961
+      },
+      "speech_features_available": false,
+      "note": "no audio features in this dataset: identical to transcript-only + memory + bandit"
+    },
+    {
+      "name": "5. speech + memory",
+      "n_test": 720,
+      "top1": 0.16666666666666666,
+      "top3": 0.4027777777777778,
+      "candidate_coverage": 0.4027777777777778,
+      "avg_reward": -0.6666666666666666,
+      "clarification_burden": 1.4305555555555556,
+      "latency_ms_per_interaction": 3.352886250387302,
+      "curve": {
+        "0": 0.095,
+        "1": 0.125,
+        "2": 0.18,
+        "3": 0.1625,
+        "4": 0.17,
+        "5": 0.22,
+        "6": 0.15,
+        "7": 0.1675,
+        "8": 0.1525,
+        "9": 0.165,
+        "10": 0.175,
+        "11": 0.1725,
+        "12": 0.165
+      },
+      "failure_counts": {
+        "MISSING_CANDIDATE": 3186,
+        "RANKING_ERROR": 1007
+      },
+      "speech_features_available": false
+    },
+    {
+      "name": "6. speech + vision",
       "n_test": 720,
       "top1": 0.2125,
       "top3": 0.2625,
       "candidate_coverage": 0.2625,
       "avg_reward": -0.575,
       "clarification_burden": 1.525,
-      "latency_ms_per_interaction": 2.132177222190674,
+      "latency_ms_per_interaction": 2.7189198607730862,
       "curve": {
         "0": 0.185,
         "1": 0.23,
@@ -58,109 +182,85 @@
       "failure_counts": {
         "MISSING_CANDIDATE": 3662,
         "RANKING_ERROR": 315
-      }
-    },
-    {
-      "name": "3. speech + memory",
-      "n_test": 720,
-      "top1": 0.21944444444444444,
-      "top3": 0.3347222222222222,
-      "candidate_coverage": 0.3347222222222222,
-      "avg_reward": -0.5611111111111111,
-      "clarification_burden": 1.4458333333333333,
-      "latency_ms_per_interaction": 2.9270326388137216,
-      "curve": {
-        "0": 0.1325,
-        "1": 0.1625,
-        "2": 0.205,
-        "3": 0.195,
-        "4": 0.1725,
-        "5": 0.25,
-        "6": 0.1675,
-        "7": 0.21,
-        "8": 0.2275,
-        "9": 0.2175,
-        "10": 0.2275,
-        "11": 0.22,
-        "12": 0.215
       },
-      "failure_counts": {
-        "MISSING_CANDIDATE": 3448,
-        "RANKING_ERROR": 554
-      }
+      "speech_features_available": false
     },
     {
-      "name": "4. speech + video + memory",
+      "name": "7. speech + memory + vision",
       "n_test": 720,
-      "top1": 0.3236111111111111,
-      "top3": 0.47638888888888886,
-      "candidate_coverage": 0.47638888888888886,
-      "avg_reward": -0.3527777777777778,
-      "clarification_burden": 1.2,
-      "latency_ms_per_interaction": 3.94917027777208,
+      "top1": 0.32083333333333336,
+      "top3": 0.49027777777777776,
+      "candidate_coverage": 0.49027777777777776,
+      "avg_reward": -0.35833333333333334,
+      "clarification_burden": 1.1888888888888889,
+      "latency_ms_per_interaction": 3.6881697225504064,
       "curve": {
-        "0": 0.23,
-        "1": 0.305,
-        "2": 0.3125,
-        "3": 0.295,
-        "4": 0.28,
-        "5": 0.355,
-        "6": 0.3075,
-        "7": 0.3375,
-        "8": 0.33,
-        "9": 0.2775,
+        "0": 0.235,
+        "1": 0.29,
+        "2": 0.315,
+        "3": 0.3,
+        "4": 0.2725,
+        "5": 0.3425,
+        "6": 0.31,
+        "7": 0.3125,
+        "8": 0.325,
+        "9": 0.285,
         "10": 0.3,
-        "11": 0.33,
-        "12": 0.305
+        "11": 0.325,
+        "12": 0.32
       },
       "failure_counts": {
-        "MISSING_CANDIDATE": 2663,
-        "RANKING_ERROR": 812
-      }
+        "MISSING_CANDIDATE": 2574,
+        "RANKING_ERROR": 917
+      },
+      "speech_features_available": false
     },
     {
-      "name": "5. speech + video + memory + RL reranking",
+      "name": "8. speech + memory + vision + bandit",
       "n_test": 720,
-      "top1": 0.36666666666666664,
-      "top3": 0.47638888888888886,
-      "candidate_coverage": 0.47638888888888886,
-      "avg_reward": -0.26666666666666666,
-      "clarification_burden": 1.1569444444444446,
-      "latency_ms_per_interaction": 5.989015277646104,
+      "top1": 0.3458333333333333,
+      "top3": 0.49027777777777776,
+      "candidate_coverage": 0.49027777777777776,
+      "avg_reward": -0.30833333333333335,
+      "clarification_burden": 1.163888888888889,
+      "latency_ms_per_interaction": 3.57045583334386,
       "curve": {
-        "0": 0.2425,
-        "1": 0.3325,
-        "2": 0.3525,
-        "3": 0.3025,
-        "4": 0.3075,
-        "5": 0.39,
-        "6": 0.37,
-        "7": 0.3575,
-        "8": 0.3875,
-        "9": 0.3425,
-        "10": 0.345,
-        "11": 0.3725,
+        "0": 0.2525,
+        "1": 0.3175,
+        "2": 0.355,
+        "3": 0.31,
+        "4": 0.335,
+        "5": 0.3725,
+        "6": 0.3675,
+        "7": 0.375,
+        "8": 0.39,
+        "9": 0.3475,
+        "10": 0.335,
+        "11": 0.3525,
         "12": 0.345
       },
       "failure_counts": {
-        "MISSING_CANDIDATE": 2663,
-        "RANKING_ERROR": 627
-      }
+        "MISSING_CANDIDATE": 2574,
+        "RANKING_ERROR": 713
+      },
+      "speech_features_available": false
     }
   ],
-  "personalization_gain": 0.043055555555555514,
-  "memory_hit_rate": 0.47638888888888886,
+  "personalization_gain": 0.024999999999999967,
+  "memory_hit_rate": 0.49027777777777776,
   "compute": {
     "device": "local CPU",
-    "examples_processed": 25000,
+    "examples_processed": 40000,
     "models": "hashed-embedding retrieval + linear contextual bandit"
   },
   "integrations": {
     "weave": true,
-    "elevenlabs": false,
+    "wandb_inference": false,
+    "llm_model": null,
+    "elevenlabs": true,
     "gemini": false,
-    "typesafe": false,
+    "typesafe": true,
     "coreweave": false
   },
-  "generated": "2026-09-13 01:29:04"
+  "generated": "2026-09-13 09:38:00"
 }

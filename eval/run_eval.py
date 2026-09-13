@@ -24,13 +24,60 @@ ROOT = Path(__file__).resolve().parent.parent
 CSV_PATH = ROOT / "data" / "EchoLoop_5000_Synthetic_Interactions.csv"
 REPORT = ROOT / "data" / "evaluation_report.json"
 
+# Speech-feature ablations only differ when rows carry audio features (an
+# --audio-dataset produced by data/preprocess_audio_dataset.py). On the synthetic
+# CSV they collapse onto "transcript only" and are reported as such.
 ABLATIONS = [
-    dict(name="1. speech only", video=False, mem=False, rl=False),
-    dict(name="2. speech + video", video=True, mem=False, rl=False),
-    dict(name="3. speech + memory", video=False, mem=True, rl=False),
-    dict(name="4. speech + video + memory", video=True, mem=True, rl=False),
-    dict(name="5. speech + video + memory + RL reranking", video=True, mem=True, rl=True),
+    dict(name="1. speech transcript only", video=False, mem=False, rl=False, branches=("text",)),
+    dict(name="2. speech + GeMAPS", video=False, mem=True, rl=True, branches=("text", "gemaps")),
+    dict(name="3. speech + WavLM", video=False, mem=True, rl=True, branches=("text", "speech")),
+    dict(name="4. speech + WavLM + GeMAPS", video=False, mem=True, rl=True, branches=("text", "speech", "gemaps")),
+    dict(name="5. speech + memory", video=False, mem=True, rl=False, branches=("text",)),
+    dict(name="6. speech + vision", video=True, mem=False, rl=False, branches=("text",)),
+    dict(name="7. speech + memory + vision", video=True, mem=True, rl=False, branches=("text",)),
+    dict(name="8. speech + memory + vision + bandit", video=True, mem=True, rl=True, branches=("text",)),
 ]
+ALL_BRANCHES = ("text", "speech", "gemaps")
+
+
+def load_audio_rows(path: Path) -> list[dict]:
+    """Records from data/preprocess_audio_dataset.py -> eval rows with speech branches."""
+    import numpy as np
+    rows = []
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        rec = json.loads(line)
+        if not rec.get("confirmed_meaning"):
+            continue  # nothing to score against
+        feats = np.load(ROOT / rec["speech_embedding_path"]) if rec.get("speech_embedding_path") else None
+        cands = rec.get("intent_candidates") or []
+        rows.append({
+            "user_id": rec["speaker_id"], "session_id": rec["speaker_id"], "turn_index": len(rows),
+            "fragment": rec.get("fragmented_utterance") or rec["transcript"],
+            "pause_intervals": ";".join(str(x) for x in rec["pause_features"].get("pause_intervals", [])),
+            "visible_objects": "", "pointing_target": "", "split": rec.get("split", "test"),
+            "confirmed_text": rec["confirmed_meaning"], "candidate_1": cands[0] if cands else "",
+            "_branches": {k: feats[k] for k in ALL_BRANCHES} if feats is not None else None,
+            "_timing": feats["timing"] if feats is not None else None,
+            "_pause": rec["pause_features"],
+        })
+    return rows
+
+
+def speech_features_for(row: dict, branches: tuple) -> dict | None:
+    """Rebuild the fused vector from the chosen branches (the ablation switch)."""
+    if not row.get("_branches"):
+        return None
+    from backend.speech import fusion
+    from backend.speech.schemas import SpeechObservations, VadStats
+    b = row["_branches"]
+    pick = lambda k: b[k] if (k in branches and b[k].size) else None  # noqa: E731
+    fused = fusion.fuse(pick("text"), pick("speech"), pick("gemaps"), row["_timing"])
+    pf = row["_pause"]
+    obs = SpeechObservations(transcript=row["fragment"], vad=VadStats(**{k: v for k, v in pf.items() if k in VadStats.model_fields}),
+                             fragmented=True, providers={"asr": "dataset"})
+    return {"observations": obs.model_dump(), "fused_embedding": [float(x) for x in fused]}
 
 
 def load_rows(limit: int | None) -> list[dict]:
@@ -57,7 +104,8 @@ def run_config(rows: list[dict], cfg: dict) -> dict:
             user_id=r["user_id"], session_id=r["session_id"], transcript=r["fragment"],
             pause_intervals=[float(x) for x in r["pause_intervals"].split(";") if x],
             scene_hint=objs,
-            pointing_hint=(r["pointing_target"] or None) if cfg["video"] else None))
+            pointing_hint=(r["pointing_target"] or None) if cfg["video"] else None,
+            speech_features=speech_features_for(r, cfg["branches"])))
         dt = (time.perf_counter() - t0) * 1000
 
         truth = r["confirmed_text"].strip().lower()
@@ -129,17 +177,30 @@ def log_wandb(report: dict) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--limit", type=int, default=None, help="cap rows (smoke runs)")
+    ap.add_argument("--audio-dataset", type=Path, default=None,
+                    help="JSONL from data/preprocess_audio_dataset.py (enables speech ablations)")
     args = ap.parse_args()
 
     weave_init()
-    rows = load_rows(args.limit)
+    if args.audio_dataset:
+        rows = load_audio_rows(args.audio_dataset)
+        rows.sort(key=lambda r: (r["user_id"], r["turn_index"]))
+        rows = rows[: args.limit] if args.limit else rows
+    else:
+        rows = load_rows(args.limit)
     results = [run_config(rows, cfg) for cfg in ABLATIONS]
-    frozen = next(r for r in results if r["name"].startswith("4"))
-    learned = next(r for r in results if r["name"].startswith("5"))
+    frozen = next(r for r in results if r["name"].startswith("7"))
+    learned = next(r for r in results if r["name"].startswith("8"))
+    has_audio = bool(rows and rows[0].get("_branches"))
+    for r in results:
+        r["speech_features_available"] = has_audio
+        if not has_audio and r["name"][0] in "234":
+            r["note"] = "no audio features in this dataset: identical to transcript-only + memory + bandit"
 
     report = {
-        "dataset": "EchoLoop 5,000-example synthetic interaction environment "
-                   "(staged engineering data, not real user or clinical data)",
+        "dataset": (f"audio dataset {args.audio_dataset.name}" if args.audio_dataset else
+                    "EchoLoop 5,000-example synthetic interaction environment "
+                    "(staged engineering data, not real user or clinical data)"),
         "rows_replayed": len(rows), "n_test": learned["n_test"],
         "ablations": results,
         "personalization_gain": learned["top1"] - frozen["top1"],
@@ -164,7 +225,10 @@ def main() -> None:
     for r in results:
         print(f"{r['name']:44} {r['top1']:7.3f} {r['top3']:7.3f} {r['avg_reward']:8.3f} "
               f"{r['clarification_burden']:7.2f} {r['latency_ms_per_interaction']:7.2f}")
-    print(f"\npersonalization gain (5 vs 4): {report['personalization_gain']*100:+.1f} pts top-1")
+    print(f"\npersonalization gain (8 vs 7): {report['personalization_gain']*100:+.1f} pts top-1")
+    if not has_audio:
+        print("note: ablations 2-4 need --audio-dataset (GeMAPS/WavLM features); "
+              "on the synthetic CSV they equal transcript + memory + bandit")
     print(f"report -> {REPORT}")
 
 

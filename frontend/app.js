@@ -50,6 +50,7 @@ const api = (path, body) =>
     .then(async (r) => (r.ok ? r.json() : Promise.reject(await r.json().catch(() => ({ detail: r.statusText })))));
 
 let USER = localStorage.getItem("echoloop_user") || "user_01";
+let serverASR = false, mediaRec = null, micStream = null, audioDataUrl = null;
 let profile = null, quickPhrases = [], last = null, selected = 0, stream = null, rec = null, audio = null, confirmed = null;
 
 document.querySelectorAll("[data-icon]").forEach((el) => {
@@ -357,9 +358,39 @@ function renderObjectTags(objects, pointing) {
     .map((o) => `<span class="object-tag ${o.label === pointing ? "pointing" : ""}">${esc(o.label)}</span>`).join("");
 }
 
-// ---------------- microphone: raw words, no cleanup
+// ---------------- microphone
+// Primary: record the utterance and let the server's speech subsystem (VAD +
+// Whisper word timestamps + WavLM + GeMAPS) hear it. Fallback: browser ASR.
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+async function recordStart() {
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  const mime = MediaRecorder.isTypeSupported("audio/webm;codecs=opus") ? "audio/webm;codecs=opus" : "audio/webm";
+  mediaRec = new MediaRecorder(micStream, { mimeType: mime });
+  const chunks = [];
+  mediaRec.ondataavailable = (e) => e.data.size && chunks.push(e.data);
+  mediaRec.onstop = async () => {
+    micStream.getTracks().forEach((t) => t.stop()); micStream = null;
+    const blob = new Blob(chunks, { type: "audio/webm" });
+    audioDataUrl = await new Promise((ok) => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.readAsDataURL(blob); });
+    $("mic").classList.remove("on"); $("micLabel").textContent = "Mic off";
+    $("listenStatus").textContent = "Transcribing…"; $("listenStatus").className = "pill blue";
+    companion.state("thinking", "Listening back to what you said…");
+    await process();
+    audioDataUrl = null;
+  };
+  mediaRec.start(250);
+  $("mic").classList.add("on"); $("micLabel").textContent = "Stop & suggest";
+  $("listenStatus").textContent = "Recording…"; $("listenStatus").className = "pill";
+  companion.state("listening", "I'm listening. Take your time — press again when you're done.");
+  const maxMs = { long: 45000, medium: 30000, short: 20000 }[(profile && profile.pause_tolerance) || "medium"];
+  setTimeout(() => mediaRec && mediaRec.state === "recording" && mediaRec.stop(), maxMs);
+}
 $("mic").addEventListener("click", () => {
+  if (serverASR) {
+    if (mediaRec && mediaRec.state === "recording") { mediaRec.stop(); return; }
+    recordStart().catch((e) => notify("Microphone unavailable: " + e.message));
+    return;
+  }
   if (!SR) { notify("This browser has no speech recognition (use Chrome). Typing works too."); return; }
   if (rec) { rec.stop(); return; }
   rec = new SR(); rec.lang = "en-US"; rec.interimResults = true; rec.continuous = true;
@@ -381,7 +412,7 @@ $("fragment").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.s
 
 async function process() {
   const transcript = $("fragment").value.trim();
-  if (!transcript) return;
+  if (!transcript && !audioDataUrl) return;
   $("cands").innerHTML = '<div class="candidate-empty"><p>Thinking…</p></div>';
   companion.state("thinking", "Let me think about what you might mean…");
   $("confirmRow").classList.add("hidden");
@@ -389,7 +420,7 @@ async function process() {
   const liveLabels = [...new Set(live.objects.map((o) => o.label))];   // live camera wins over the manual box
   try {
     last = await api("/interaction/process", {
-      user_id: USER, transcript,
+      user_id: USER, transcript, audio: audioDataUrl,
       frame: grabFrame(),
       scene_hint: liveLabels.length ? liveLabels
                 : useScene ? $("scene").value.split(",").map((s) => s.trim()).filter(Boolean) : [],
@@ -398,6 +429,9 @@ async function process() {
     });
   } catch (e) { notify(e.detail || "Could not reach EchoLoop"); return; }
   selected = 0; confirmed = null;
+  if (last.transcript) $("fragment").value = last.transcript;      // server ASR wording, unedited
+  $("listenStatus").textContent = last.speech_observations ? `Heard · ${last.speech_observations.vad.pause_count} pause(s)` : "Ready";
+  $("listenStatus").className = "pill grey";
   companion.state("idle", `Do you mean: ${last.top_candidate}`);
   companion.say("ask", false, last.interaction_id);
   renderPerception(last.perception);
@@ -597,6 +631,8 @@ async function loadEval() {
   try {
     const st = await api("/api/status");
     if (!st.integrations.elevenlabs) $("speak").title = "Browser voice (no ElevenLabs key set)";
+    serverASR = !!(st.speech && st.speech.enabled && st.speech.whisper && st.speech.ffmpeg);
+    $("mic").title = serverASR ? `Server speech recognition (Whisper ${st.speech.whisper_model})` : "Browser speech recognition";
   } catch { notify("Backend not reachable. Start it with: python -m uvicorn backend.main:app"); }
   if (localStorage.getItem("echoloop_onboarded")) {
     $("userId").value = USER;

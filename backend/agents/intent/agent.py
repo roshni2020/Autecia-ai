@@ -113,7 +113,15 @@ def _llm(p: Perception, memories: list[MemoryHit], n: int) -> list[str] | None:
     objs = ", ".join(o.label for o in p.objects) or "none"
     mem = "; ".join(f'"{m.confirmed_text}"' for m in memories) or "none"
     seeds = "; ".join(f'"{t}"' for t in _offline(p, memories, 3)) or "none"
+    facts = ""
+    if p.speech is not None:
+        s = p.speech
+        facts = (f"Speech facts: {s.vad.pause_count} long pause(s), "
+                 f"{'fragmented' if s.fragmented else 'complete-sounding'} utterance, "
+                 f"{s.filler_count} filler word(s) kept as spoken"
+                 f"{', repeated words' if s.repetition_detected else ''}.\n")
     prompt = (
+        facts +
         f'Incomplete utterance, exactly as spoken: "{p.transcript}"\n'
         f"Objects visible right now: {objs}\n"
         f"Pointing at: {p.gesture.target or 'nothing'}\n"
