@@ -1,0 +1,33 @@
+# Functional message bank (AAC-style carriers + common messages).
+# Drop-in replacement: export sentences from https://aactext.org/imagine/ (Dataset 2)
+# or https://aactext.org/comm2/ (Dataset 3), one per line, and they load from here.
+I need a break.
+It is too loud.
+I want to leave.
+Can you help me?
+I need help.
+Please wait a moment.
+I do not understand.
+Can you say that again?
+I am finished.
+I want to go home.
+Can we go outside?
+I need water.
+I am hungry.
+I need the bathroom.
+Turn the light down.
+That is too much.
+Not right now.
+Yes please.
+No thank you.
+I want to be alone for a bit.
+Too many people here.
+Can you turn the music off?
+I need my headphones.
+I want to sit down.
+Can you get that for me?
+I am not finished talking.
+Give me a minute to think.
+I want the other one.
+Can you write it down?
+Let us do it later.

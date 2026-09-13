@@ -1,0 +1,13 @@
+fastapi
+uvicorn[standard]
+pydantic>=2
+numpy
+httpx
+python-multipart
+# tracing + evaluation
+wandb
+weave
+# notebook (molab)
+marimo
+matplotlib
+pandas

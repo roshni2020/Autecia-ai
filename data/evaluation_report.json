@@ -1,0 +1,166 @@
+{
+  "dataset": "EchoLoop 5,000-example synthetic interaction environment (staged engineering data, not real user or clinical data)",
+  "rows_replayed": 5000,
+  "n_test": 720,
+  "ablations": [
+    {
+      "name": "1. speech only",
+      "n_test": 720,
+      "top1": 0.03194444444444444,
+      "top3": 0.03194444444444444,
+      "candidate_coverage": 0.03194444444444444,
+      "avg_reward": -0.9361111111111111,
+      "clarification_burden": 1.9361111111111111,
+      "latency_ms_per_interaction": 2.1009802781110114,
+      "curve": {
+        "0": 0.05,
+        "1": 0.025,
+        "2": 0.055,
+        "3": 0.0225,
+        "4": 0.045,
+        "5": 0.04,
+        "6": 0.04,
+        "7": 0.035,
+        "8": 0.0275,
+        "9": 0.0425,
+        "10": 0.0425,
+        "11": 0.0425,
+        "12": 0.015
+      },
+      "failure_counts": {
+        "MISSING_CANDIDATE": 4810
+      }
+    },
+    {
+      "name": "2. speech + video",
+      "n_test": 720,
+      "top1": 0.2125,
+      "top3": 0.2625,
+      "candidate_coverage": 0.2625,
+      "avg_reward": -0.575,
+      "clarification_burden": 1.525,
+      "latency_ms_per_interaction": 2.132177222190674,
+      "curve": {
+        "0": 0.185,
+        "1": 0.23,
+        "2": 0.2075,
+        "3": 0.1775,
+        "4": 0.195,
+        "5": 0.225,
+        "6": 0.22,
+        "7": 0.1975,
+        "8": 0.2275,
+        "9": 0.1725,
+        "10": 0.1975,
+        "11": 0.2275,
+        "12": 0.19
+      },
+      "failure_counts": {
+        "MISSING_CANDIDATE": 3662,
+        "RANKING_ERROR": 315
+      }
+    },
+    {
+      "name": "3. speech + memory",
+      "n_test": 720,
+      "top1": 0.21944444444444444,
+      "top3": 0.3347222222222222,
+      "candidate_coverage": 0.3347222222222222,
+      "avg_reward": -0.5611111111111111,
+      "clarification_burden": 1.4458333333333333,
+      "latency_ms_per_interaction": 2.9270326388137216,
+      "curve": {
+        "0": 0.1325,
+        "1": 0.1625,
+        "2": 0.205,
+        "3": 0.195,
+        "4": 0.1725,
+        "5": 0.25,
+        "6": 0.1675,
+        "7": 0.21,
+        "8": 0.2275,
+        "9": 0.2175,
+        "10": 0.2275,
+        "11": 0.22,
+        "12": 0.215
+      },
+      "failure_counts": {
+        "MISSING_CANDIDATE": 3448,
+        "RANKING_ERROR": 554
+      }
+    },
+    {
+      "name": "4. speech + video + memory",
+      "n_test": 720,
+      "top1": 0.3236111111111111,
+      "top3": 0.47638888888888886,
+      "candidate_coverage": 0.47638888888888886,
+      "avg_reward": -0.3527777777777778,
+      "clarification_burden": 1.2,
+      "latency_ms_per_interaction": 3.94917027777208,
+      "curve": {
+        "0": 0.23,
+        "1": 0.305,
+        "2": 0.3125,
+        "3": 0.295,
+        "4": 0.28,
+        "5": 0.355,
+        "6": 0.3075,
+        "7": 0.3375,
+        "8": 0.33,
+        "9": 0.2775,
+        "10": 0.3,
+        "11": 0.33,
+        "12": 0.305
+      },
+      "failure_counts": {
+        "MISSING_CANDIDATE": 2663,
+        "RANKING_ERROR": 812
+      }
+    },
+    {
+      "name": "5. speech + video + memory + RL reranking",
+      "n_test": 720,
+      "top1": 0.36666666666666664,
+      "top3": 0.47638888888888886,
+      "candidate_coverage": 0.47638888888888886,
+      "avg_reward": -0.26666666666666666,
+      "clarification_burden": 1.1569444444444446,
+      "latency_ms_per_interaction": 5.989015277646104,
+      "curve": {
+        "0": 0.2425,
+        "1": 0.3325,
+        "2": 0.3525,
+        "3": 0.3025,
+        "4": 0.3075,
+        "5": 0.39,
+        "6": 0.37,
+        "7": 0.3575,
+        "8": 0.3875,
+        "9": 0.3425,
+        "10": 0.345,
+        "11": 0.3725,
+        "12": 0.345
+      },
+      "failure_counts": {
+        "MISSING_CANDIDATE": 2663,
+        "RANKING_ERROR": 627
+      }
+    }
+  ],
+  "personalization_gain": 0.043055555555555514,
+  "memory_hit_rate": 0.47638888888888886,
+  "compute": {
+    "device": "local CPU",
+    "examples_processed": 25000,
+    "models": "hashed-embedding retrieval + linear contextual bandit"
+  },
+  "integrations": {
+    "weave": true,
+    "elevenlabs": false,
+    "gemini": false,
+    "typesafe": false,
+    "coreweave": false
+  },
+  "generated": "2026-09-13 01:29:04"
+}
