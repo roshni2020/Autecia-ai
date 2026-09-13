@@ -150,34 +150,35 @@ def gemini_text(prompt: str) -> str | None:
         return None
 
 
-# ---- TypeSafe AI ------------------------------------------------------------
+# ---- TypeSafe AI (System One: typed judgments + calibrated probabilities) ----
+# Off for batch replays unless asked: 25,000 network calls is not an evaluation run.
+TYPESAFE_ON = os.getenv("ECHOLOOP_TYPESAFE", "1") != "0"
 
-def typesafe_validate(raw: str, model) -> Any | None:
-    """Contract-check LLM output against a pydantic model.
 
-    Uses the TypeSafe AI service when configured (it repairs off-schema output);
-    otherwise strict local validation with the same fail-closed behaviour.
-    """
+def typesafe_judge(state: dict, questions: dict):
+    """One System One request. Returns the SDK response, or None when TypeSafe is
+    not configured / unreachable so callers fall back to their local path."""
+    if not (TYPESAFE_ON and os.getenv("TYPESAFE_API_KEY")):
+        return None
+    try:
+        from typesafe_sdk import TypeSafeClient
+        with TypeSafeClient(timeout=float(os.getenv("TYPESAFE_TIMEOUT", "8"))) as client:
+            return client.system_one(state=state, questions=questions)
+    except Exception as e:
+        print(f"[typesafe] unavailable, local fallback: {e}")
+        return None
+
+
+def parse_llm_json(raw: str | None, model) -> Any | None:
+    """Fail-closed pydantic parse of free-form LLM text (Gemini candidate path)."""
     if raw is None:
         return None
-    key, url = os.getenv("TYPESAFE_API_KEY"), os.getenv(
-        "TYPESAFE_URL", "https://api.typesafe.ai/v1/validate")
-    if key:
-        try:
-            r = httpx.post(url, headers={"Authorization": f"Bearer {key}"}, timeout=20,
-                           json={"schema": model.model_json_schema(), "output": raw,
-                                 "repair": True})
-            r.raise_for_status()
-            body = r.json()
-            raw = json.dumps(body.get("repaired") or body.get("output") or body)
-        except Exception as e:
-            print(f"[typesafe] service unavailable, local validation: {e}")
     try:
         m = re.search(r"[\[{].*[\]}]", raw, re.S)
         return model.model_validate_json(m.group(0) if m else raw)
     except Exception as e:
-        print(f"[typesafe] output rejected: {e}")
-        return None  # fail closed -> caller falls back to the offline generator
+        print(f"[intent] LLM output rejected: {e}")
+        return None
 
 
 def status() -> dict:

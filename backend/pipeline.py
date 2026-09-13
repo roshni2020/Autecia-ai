@@ -25,7 +25,8 @@ def process(con, req: ProcessReq) -> dict:
     query = f"{perc.transcript} {perception_agent.visual_summary(perc)}"
     memories = memory.search(con, req.user_id, query, k=3)
     intents = intent_agent.run(perc, memories, profile.suggestion_count)
-    ranked = learning_agent.rerank(intents, perc, memories, policy)
+    judgment = learning_agent.judge(perc, memories, [c.text for c in intents.candidates])
+    ranked = learning_agent.rerank(intents, perc, memories, policy, judgment)
 
     interaction_id = uuid.uuid4().hex[:12]
     session_id = req.session_id or uuid.uuid4().hex[:8]
@@ -35,6 +36,7 @@ def process(con, req: ProcessReq) -> dict:
         _msg("perception_summary", "perception_agent", "intent_agent", perc.model_dump()),
         _msg("candidate_set", "intent_agent", "learning_agent",
              {"candidates": [c.model_dump() for c in intents.candidates]}),
+        *([_msg("system_one_judgment", "typesafe", "learning_agent", judgment)] if judgment else []),
         _msg("ranked_candidates", "learning_agent", "reflection_agent",
              {"ranked": [{"text": c.text, "score": c.score} for c in ranked],
               "policy_version": policy.version}),
@@ -49,6 +51,7 @@ def process(con, req: ProcessReq) -> dict:
         "visual_summary": perception_agent.visual_summary(perc),
         "candidates": [c.model_dump() for c in ranked],
         "memory_matches": [m.model_dump() for m in memories],
+        "judgment": judgment,
         "policy_version": policy.version, "policy_weights": policy.as_dict(),
         "latency_ms": latency_ms,
     }
@@ -58,7 +61,9 @@ def process(con, req: ProcessReq) -> dict:
     trace_summary = [
         f"Perception: {perception_agent.summary(perc)}",
         f"Intent: generated {len(ranked)} candidate meanings",
-        f"Learning: {learning_agent.summary(memories, ranked)}",
+        f"Learning: {learning_agent.summary(memories, ranked)}"
+        + (f"; System One favours \"{judgment['choice']}\" "
+           f"({int(judgment['confidence'] * 100)}% confidence)" if judgment else ""),
     ]
     log_trace("interaction.process", {**observation, "trace_summary": trace_summary})
 
@@ -68,6 +73,7 @@ def process(con, req: ProcessReq) -> dict:
             "candidate_detail": [c.model_dump() for c in ranked],
             "top_candidate": ranked[0].text if ranked else None,
             "memory_matches": [m.model_dump() for m in memories],
+            "judgment": judgment,
             "trace_summary": trace_summary, "agent_messages": bus,
             "policy_version": policy.version, "policy_weights": policy.as_dict(),
             "perception": perc.model_dump(), "latency_ms": latency_ms,

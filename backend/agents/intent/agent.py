@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from ...integrations import gemini_text, op, typesafe_validate
+from ...integrations import gemini_text, op, parse_llm_json
 from ...schemas import Candidate, IntentSet, MemoryHit, Perception
 
 BANK = Path(__file__).resolve().parents[3] / "data" / "phrasebank.txt"
@@ -27,7 +27,7 @@ CARRIERS = [
 
 
 class _LLMCandidates(BaseModel):
-    """Schema TypeSafe AI enforces on the model output."""
+    """Schema the Gemini candidate path must satisfy."""
     candidates: list[str] = Field(min_length=2, max_length=4)
 
 
@@ -107,7 +107,7 @@ def _llm(p: Perception, memories: list[MemoryHit], n: int) -> list[str] | None:
         f"Give {n} short, plainly-worded, DIFFERENT complete sentences they might have "
         "meant, first person. Use only the objects/actions given — invent nothing. "
         'Return JSON: {"candidates": ["...", "..."]}')
-    parsed = typesafe_validate(gemini_text(prompt), _LLMCandidates)
+    parsed = parse_llm_json(gemini_text(prompt), _LLMCandidates)
     return parsed.candidates if parsed else None
 
 

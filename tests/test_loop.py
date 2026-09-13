@@ -5,6 +5,7 @@ python -m tests.test_loop     (or: pytest tests/test_loop.py)
 import os
 
 os.environ.setdefault("ECHOLOOP_TRACE", "0")
+os.environ.setdefault("ECHOLOOP_TYPESAFE", "0")
 
 from backend import memory, pipeline  # noqa: E402
 from backend.bandit import Policy, initial_weights  # noqa: E402

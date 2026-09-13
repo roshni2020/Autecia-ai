@@ -125,7 +125,7 @@ Everything degrades to a working offline path, so the demo never depends on a ne
 | **W&B runs** | one run per evaluation: ablation table + headline metrics | report JSON only |
 | **ElevenLabs** | speaking confirmed text | browser `speechSynthesis` |
 | **Gemini** | frame → visible objects + pointing (observable facts only) | scene box in the UI |
-| **TypeSafe AI** | schema-contract on LLM candidate output, fail-closed | strict Pydantic validation |
+| **TypeSafe AI** (System One, `jev`) | per-candidate "which one is meant?" probability → a bandit feature; failure-type classifier in Reflection | feature is 0; heuristic reflection |
 | **CoreWeave** | batch evaluation / inference host | local CPU, recorded in the report |
 
 Keys go in `.env` (git-ignored). Batch jobs set `ECHOLOOP_TRACE=0` — a span per agent call turns
@@ -138,14 +138,32 @@ claude mcp add --transport http wandb https://mcp.withwandb.com/mcp \
   --header "Authorization: Bearer $WANDB_API_KEY"
 ```
 
+## TypeSafe System One
+
+Two judgments per interaction, both via `client.system_one()` ([backend/integrations.py](backend/integrations.py) `typesafe_judge`):
+
+- **Learning agent** — a `Choice` over the candidate sentences (+ "none of these") given the utterance,
+  visible objects, pointing target and this person's confirmed history. The returned probability becomes
+  the `judgment` feature. It is evidence, not the decision: the per-user bandit learns how much to trust it
+  next to memory and vision, so explicit user feedback still wins.
+- **Reflection agent** — a `Choice` over the nine failure types with plain-language criteria, replacing the
+  rule-based classifier whenever TypeSafe is reachable.
+
+Batch replays run with `ECHOLOOP_TYPESAFE=0` so an evaluation is not 25,000 network calls.
+
 ## Voice and camera
 
 - **Input**: browser speech recognition, continuous, with pause tolerance from the support mode
   (long = 6s of silence before it assumes you are finished). The transcript is passed through
   **unedited** — fillers, repeats and fragments are the signal, not noise to clean up.
 - **Output**: ElevenLabs or the browser voice, confirmed text only, with a **Stop** button.
-- **Camera**: off by default, one click to disable, frames are sent for object/pointing
-  detection and never stored.
+- **Camera**: off by default, one click to disable. Detection runs **in the browser**:
+  TensorFlow.js COCO-SSD boxes objects (the `person` class is discarded — never drawn, never sent) and
+  MediaPipe Hands turns an extended index finger into a ray; the object it hits is the pointing target.
+  Detected labels and the pointing target go to the Perception agent as scene context. Frames stay
+  on-device unless a server vision key (`GEMINI_API_KEY`) is configured. Nothing is stored.
+  COCO-SSD knows 80 everyday classes (book, cup, bottle, cell phone, laptop, remote, scissors, …) —
+  not "headphones", so demo with a book and a cup.
 
 ## User control
 

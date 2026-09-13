@@ -128,25 +128,135 @@ $("settingsForm").addEventListener("submit", async (e) => {
   $("settingsStatus").textContent = "Saved.";
 });
 
-// ---------------- camera (objects + pointing only; nothing about faces or feelings)
+// ---------------- camera: live object detection + hand pointing, in the browser.
+// COCO-SSD boxes objects (the "person" class is discarded, never drawn, never sent).
+// MediaPipe Hands gives an index-finger ray; the object it hits is the pointing target.
+// Frames never leave the browser unless a server vision key is configured.
+const CDN = {
+  tf: "https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.22.0/dist/tf.min.js",
+  coco: "https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js",
+  hands: "https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/hands.js",
+};
+let detector = null, hands = null, overlay = null, detectTimer = null, detecting = false;
+let live = { objects: [], pointing: null, fingertip: null, ray: null };
+
+const loadScript = (src) => new Promise((ok, fail) => {
+  if (document.querySelector(`script[src="${src}"]`)) return ok();
+  const el = document.createElement("script"); el.src = src; el.onload = ok; el.onerror = () => fail(new Error("failed " + src));
+  document.head.appendChild(el);
+});
+
+async function loadVision() {
+  if (detector) return;
+  $("sceneSummary").textContent = "Loading object detector…";
+  await loadScript(CDN.tf); await loadScript(CDN.coco);
+  detector = await cocoSsd.load({ base: "lite_mobilenet_v2" });
+  try {
+    await loadScript(CDN.hands);
+    hands = new Hands({ locateFile: (f) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands@0.4.1675469240/${f}` });
+    hands.setOptions({ maxNumHands: 1, modelComplexity: 0, minDetectionConfidence: 0.6, minTrackingConfidence: 0.5 });
+    hands.onResults(onHands);
+  } catch (e) { hands = null; notify("Pointing detection unavailable; objects only."); }
+}
+
+function ensureOverlay() {
+  if (overlay) return overlay;
+  overlay = document.createElement("canvas"); overlay.className = "overlay";
+  document.querySelector(".camera-panel").appendChild(overlay);
+  return overlay;
+}
+
+function onHands(res) {
+  const lm = res.multiHandLandmarks && res.multiHandLandmarks[0];
+  if (!lm) { live.ray = null; live.fingertip = null; return; }
+  const v = $("video"), W = v.videoWidth, H = v.videoHeight;
+  const tip = lm[8], base = lm[5];                     // index fingertip, index knuckle
+  const extended = Math.hypot(tip.x - lm[0].x, tip.y - lm[0].y) > 1.15 * Math.hypot(lm[12].x - lm[0].x, lm[12].y - lm[0].y);
+  if (!extended) { live.ray = null; live.fingertip = null; return; }
+  live.fingertip = [tip.x * W, tip.y * H];
+  live.ray = [(tip.x - base.x) * W, (tip.y - base.y) * H];
+}
+
+function pointedObject(objects) {
+  if (!live.fingertip || !live.ray) return null;
+  const [fx, fy] = live.fingertip, [dx, dy] = live.ray, n = Math.hypot(dx, dy) || 1;
+  let best = null, bestScore = 0;
+  for (const o of objects) {
+    const [x, y, w, h] = o.bbox, cx = x + w / 2, cy = y + h / 2;
+    const vx = cx - fx, vy = cy - fy, dist = Math.hypot(vx, vy) || 1;
+    const cos = (vx * dx + vy * dy) / (dist * n);              // alignment with finger ray
+    const inside = fx >= x && fx <= x + w && fy >= y && fy <= y + h;
+    const score = inside ? 2 : cos > 0.75 ? cos - dist / 4000 : 0;
+    if (score > bestScore) { bestScore = score; best = o; }
+  }
+  return best;
+}
+
+async function detectLoop() {
+  const v = $("video");
+  if (!stream || !detector || !v.videoWidth || detecting) return;
+  detecting = true;
+  try {
+    const raw = await detector.detect(v, 8, 0.45);
+    const objects = raw.filter((o) => o.class !== "person");   // never box or report people
+    if (hands) await hands.send({ image: v });
+    const target = pointedObject(objects);
+    live.objects = objects.map((o) => ({ label: o.class, confidence: +o.score.toFixed(2), bbox: o.bbox }));
+    live.pointing = target ? target.class : null;
+    drawOverlay(objects, target);
+    const labels = [...new Set(live.objects.map((o) => o.label))];
+    $("objectsSummary").textContent = labels.length ? labels.join(", ") : "No objects detected yet";
+    $("gestureSummary").textContent = live.pointing ? `pointing at ${live.pointing}` : live.fingertip ? "hand raised, not at an object" : "No pointing detected";
+    $("sceneSummary").textContent = `Live · ${labels.length} object type(s) · on-device detection`;
+    renderObjectTags(live.objects, live.pointing);
+  } finally { detecting = false; }
+}
+
+function drawOverlay(objects, target) {
+  const v = $("video"), c = ensureOverlay();
+  c.width = v.videoWidth; c.height = v.videoHeight;
+  const g = c.getContext("2d"); g.clearRect(0, 0, c.width, c.height);
+  g.lineWidth = 3; g.font = "600 16px Segoe UI, sans-serif";
+  for (const o of objects) {
+    const [x, y, w, h] = o.bbox, hit = o === target, color = hit ? "#59d8ff" : "#7fe7c7";
+    g.strokeStyle = color; g.strokeRect(x, y, w, h);
+    const label = `${o.class} ${Math.round(o.score * 100)}%`, tw = g.measureText(label).width + 12;
+    g.fillStyle = color; g.fillRect(x, Math.max(0, y - 22), tw, 22);
+    g.fillStyle = "#0b3a4a"; g.fillText(label, x + 6, Math.max(16, y - 6));
+  }
+  if (live.fingertip) {
+    const [fx, fy] = live.fingertip; g.fillStyle = "#ffd166";
+    g.beginPath(); g.arc(fx, fy, 7, 0, 7); g.fill();
+    if (live.ray) {
+      const [dx, dy] = live.ray; g.strokeStyle = "#ffd166"; g.setLineDash([6, 6]);
+      g.beginPath(); g.moveTo(fx, fy); g.lineTo(fx + dx * 6, fy + dy * 6); g.stroke(); g.setLineDash([]);
+    }
+  }
+}
+
 async function startCamera() {
   try {
-    stream = await navigator.mediaDevices.getUserMedia({ video: true });
+    stream = await navigator.mediaDevices.getUserMedia({ video: { width: { ideal: 960 } } });
   } catch (e) { notify("Camera unavailable: " + e.message); return; }
   $("video").srcObject = stream;
   $("cameraEmpty").classList.add("hidden");
   $("camBtn").classList.add("on"); $("camLabel").textContent = "Camera on";
   $("cameraStatus").textContent = "LIVE"; $("cameraStatus").classList.add("live");
-  $("sceneSummary").textContent = "Camera on — frames are analysed for objects, never stored";
   if (profile && !profile.camera_enabled) saveProfile({ camera_enabled: true });
+  try { await loadVision(); }
+  catch (e) { notify("Object detection failed to load: " + e.message); $("sceneSummary").textContent = "Camera on · detection unavailable"; return; }
+  detectTimer = setInterval(() => detectLoop().catch((e) => console.warn(e)), 450);
 }
 function stopCamera() {
+  clearInterval(detectTimer); detectTimer = null;
   if (stream) stream.getTracks().forEach((t) => t.stop());
   stream = null; $("video").srcObject = null;
+  live = { objects: [], pointing: null, fingertip: null, ray: null };
+  if (overlay) overlay.getContext("2d").clearRect(0, 0, overlay.width, overlay.height);
   $("cameraEmpty").classList.remove("hidden");
   $("camBtn").classList.remove("on"); $("camLabel").textContent = "Camera off";
   $("cameraStatus").textContent = "PRIVATE SPACE"; $("cameraStatus").classList.remove("live");
-  $("sceneSummary").textContent = "Camera is off";
+  $("sceneSummary").textContent = "Camera is off"; $("objectsSummary").textContent = "Waiting for context"; $("gestureSummary").textContent = "No pointing detected";
   renderObjectTags([]);
   if (profile && profile.camera_enabled) saveProfile({ camera_enabled: false });
 }
@@ -164,7 +274,9 @@ function grabFrame() {
 function renderObjectTags(objects, pointing) {
   let box = document.querySelector(".object-tags");
   if (!box) { box = document.createElement("div"); box.className = "object-tags"; document.querySelector(".camera-panel").appendChild(box); }
-  box.innerHTML = objects.map((o) => `<span class="object-tag ${o.label === pointing ? "pointing" : ""}">${esc(o.label)}</span>`).join("");
+  const seen = new Set();
+  box.innerHTML = objects.filter((o) => !seen.has(o.label) && seen.add(o.label))
+    .map((o) => `<span class="object-tag ${o.label === pointing ? "pointing" : ""}">${esc(o.label)}</span>`).join("");
 }
 
 // ---------------- microphone: raw words, no cleanup
@@ -194,12 +306,15 @@ async function process() {
   $("cands").innerHTML = '<div class="candidate-empty"><p>Thinking…</p></div>';
   $("confirmRow").classList.add("hidden");
   const useScene = $("sceneEnabled").checked;
+  const liveLabels = [...new Set(live.objects.map((o) => o.label))];   // live camera wins over the manual box
   try {
     last = await api("/interaction/process", {
       user_id: USER, transcript,
       frame: grabFrame(),
-      scene_hint: useScene ? $("scene").value.split(",").map((s) => s.trim()).filter(Boolean) : [],
-      pointing_hint: useScene ? $("pointing").value.trim() || null : null,
+      scene_hint: liveLabels.length ? liveLabels
+                : useScene ? $("scene").value.split(",").map((s) => s.trim()).filter(Boolean) : [],
+      pointing_hint: liveLabels.length ? live.pointing
+                   : useScene ? $("pointing").value.trim() || null : null,
     });
   } catch (e) { notify(e.detail || "Could not reach EchoLoop"); return; }
   selected = 0; confirmed = null;
@@ -223,7 +338,7 @@ function renderCandidates() {
   $("cands").innerHTML = d.map((c, i) =>
     `<button class="candidate ${i === selected ? "selected" : ""}" role="radio" aria-checked="${i === selected}" data-i="${i}">
        <span class="radio"></span><span class="text">${esc(c.text)}</span>
-       <small>memory ${pct(c.memory_similarity)} · visual ${pct(c.visual_support)}</small></button>`).join("") +
+       <small>${c.features.judgment ? `System One ${pct(c.features.judgment)} · ` : ""}memory ${pct(c.memory_similarity)} · visual ${pct(c.visual_support)}</small></button>`).join("") +
     `<button class="candidate none" id="noneBtn"><span class="radio"></span><span class="text">None of these / Edit message</span><span data-icon="edit"></span></button>`;
   document.querySelectorAll(".candidate[data-i]").forEach((b) => b.addEventListener("click", () => { selected = +b.dataset.i; renderCandidates(); }));
   $("noneBtn").addEventListener("click", () => openEdit(""));
@@ -244,13 +359,14 @@ function renderAgents(summary, reflection) {
 
 function renderTrace(msgs) {
   const AGENT = { perception_agent: "Perception", intent_agent: "Intent", learning_agent: "Learning",
-                  reflection_agent: "Reflection", user: "You" };
+                  reflection_agent: "Reflection", user: "You", typesafe: "TypeSafe System One" };
   const brief = (m) => {
     const p = m.payload;
     switch (m.message_type) {
       case "perception_summary": return `“${p.transcript}” · objects: ${p.objects.map((o) => o.label).join(", ") || "none"} · pointing: ${p.gesture.target || "none"} · confidence ${pct(p.perception_confidence)}`;
       case "candidate_set": return p.candidates.map((c) => `${c.text} (base ${c.base_score.toFixed(2)})`).join("  |  ");
       case "ranked_candidates": return p.ranked.map((c, i) => `#${i + 1} ${c.text} (${c.score.toFixed(2)})`).join("  |  ") + ` · policy v${p.policy_version}`;
+      case "system_one_judgment": return Object.entries(p.probabilities).sort((a, b) => b[1] - a[1]).map(([t, v]) => `${t} ${pct(v)}`).join("  |  ") + ` · confidence ${pct(p.confidence)} · ${p.model}`;
       case "user_feedback": return `${p.accepted ? "accepted" : "rejected"} → reward ${p.reward > 0 ? "+1" : "−1"}${p.confirmed_text ? ` · confirmed “${p.confirmed_text}”` : " · none fit"}`;
       case "policy_update": return Object.keys(p.weights_after).filter((k) => p.weights_after[k] !== p.weights_before[k])
         .map((k) => `${k} ${p.weights_before[k]} → ${p.weights_after[k]}`).join(", ") || "no weight change (generator miss, ranker left alone)";
