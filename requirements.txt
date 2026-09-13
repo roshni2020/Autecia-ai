@@ -4,9 +4,12 @@ pydantic>=2
 numpy
 httpx
 python-multipart
+typesafe-sdk
 # tracing + evaluation
 wandb
 weave
+opentelemetry-sdk
+opentelemetry-exporter-otlp-proto-http
 # notebook (molab)
 marimo
 matplotlib

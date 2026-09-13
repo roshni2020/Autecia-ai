@@ -12,7 +12,10 @@ def judge(p: Perception, memories: list[MemoryHit], texts: list[str]) -> dict | 
     Returns {"probabilities": {text: p}, "confidence", "choice", "model"} or None.
     This is a *feature*, not the decision: the bandit learns how much to trust it.
     """
-    from typesafe_sdk import Choice  # optional dependency, imported lazily
+    try:
+        from typesafe_sdk import Choice  # optional dependency
+    except ImportError:
+        return None
     resp = typesafe_judge(
         state={
             "utterance": p.transcript,

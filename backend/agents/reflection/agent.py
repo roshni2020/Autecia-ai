@@ -36,7 +36,10 @@ RECOMMEND = {
 
 
 def _classify_with_typesafe(prediction, conf, perception, candidates, memory_matches):
-    from typesafe_sdk import Choice
+    try:
+        from typesafe_sdk import Choice
+    except ImportError:
+        return None
     resp = typesafe_judge(
         state={"utterance": perception.transcript,
                "shown_suggestion": prediction,
