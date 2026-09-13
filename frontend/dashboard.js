@@ -158,7 +158,7 @@ async function feedback(body) {
     if (turn !== epoch) return;
     feedbackDone = true; stats.feedback++; if (body.accepted) stats.accepted++; else stats.corrected++; insights();
     $('reflection').textContent = result.reflection.recommendation; $('activityBadge').textContent = 'Feedback saved';
-    confirmed = result.speak ? {text:result.speak,interaction_id:interaction} : null;
+    confirmed = result.speak ? {text:result.speak,interaction_id:interaction} : null; $('sendCare').disabled = !confirmed; $('sendCare').textContent = 'Send to caregiver';
     $('speech').hidden = !confirmed; $('confirmed').textContent = confirmed ? confirmed.text : '';
     notice(confirmed ? 'Message confirmed. Speak it when you are ready.' : 'Feedback saved. No message will be spoken.');
     loadMemory().catch(() => notice('Feedback saved. Memory list could not refresh.'));
@@ -170,6 +170,12 @@ $('no').onclick = () => feedback({accepted:false,none_fit:true});
 $('edit').onclick = () => { if (!last) return; $('edited').value = last.candidate_detail[chosen].text; $('editDialog').showModal(); $('edited').focus(); };
 $('cancelEdit').onclick = () => $('editDialog').close();
 $('editForm').onsubmit = e => { e.preventDefault(); const text = $('edited').value.trim(); if (!text) return; $('editDialog').close(); feedback({accepted:false,confirmed_text:text}); };
+$('sendCare').onclick = async () => {
+  if (!confirmed) return;
+  $('sendCare').disabled = true; $('sendCare').textContent = 'Sending…';
+  try { const r = await api('/api/send', {interaction_id: confirmed.interaction_id}); $('sendCare').textContent = r.ok ? 'Sent ✓' : 'Not sent'; notice(r.ok ? `Sent to caregiver channel: “${r.text}”` : 'Could not send: ' + (r.error || 'unknown')); }
+  catch (e) { $('sendCare').textContent = 'Send to caregiver'; $('sendCare').disabled = false; notice(e.message || 'Send failed'); }
+};
 $('speak').onclick = async () => {
   if (!confirmed) return;
   stopSpeaking(); const version = speechVersion; const message = {...confirmed};

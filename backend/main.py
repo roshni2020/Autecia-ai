@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 from . import bandit, memory
 from .integrations import COMPANION_VOICE, status, tts, weave_init
+from . import integrations_slack as slack
 from .pipeline import feedback as run_feedback
 from .pipeline import process as run_process
 from .schemas import SUPPORT_MODES, FeedbackReq, ProcessReq, StartReq, SupportProfile
@@ -23,9 +24,45 @@ QUICK_PHRASES = ["I need a break.", "It is too loud.", "I want to leave.",
                  "Can you wait a moment?", "I need help."]
 
 
+class SendReq(BaseModel):
+    interaction_id: str
+    channel: str | None = None
+
+
+@app.post("/api/send")
+def send_to_caregiver(req: SendReq):
+    """Post the CONFIRMED message of an interaction to the caregiver Slack channel.
+    Refuses anything that was not confirmed by the user (same rule as speaking)."""
+    row = memory.get_interaction(con, req.interaction_id)
+    if row is None or not row["feedback"]:
+        raise HTTPException(409, "message is not confirmed yet")
+    import json
+    text = (json.loads(row["feedback"]).get("confirmed_text") or "").strip()
+    if not text:
+        raise HTTPException(409, "nothing confirmed to send")
+    if not slack.configured():
+        raise HTTPException(503, "Slack is not configured (SLACK_BOT_TOKEN)")
+    try:
+        result = slack.send(text, req.channel)
+    except Exception as e:
+        raise HTTPException(502, f"Slack unreachable: {e}")
+    from .integrations import log_trace
+    log_trace("interaction.send", {"interaction_id": req.interaction_id, "text": text, **result})
+    return {"text": text, **result}
+
+
+@app.get("/api/send/recent")
+def recent_sent():
+    try:
+        return {"messages": slack.recent(5), "configured": slack.configured(),
+                "base_url": slack._base() if slack.configured() else None}
+    except Exception as e:
+        raise HTTPException(502, f"Slack unreachable: {e}")
+
+
 @app.get("/api/status")
 def api_status():
-    return {"integrations": status(), "support_modes": SUPPORT_MODES,
+    return {"integrations": {**status(), "slack": slack.configured()}, "support_modes": SUPPORT_MODES,
             "speech": speech_subsystem.status()}
 
 

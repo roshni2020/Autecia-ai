@@ -519,6 +519,7 @@ async function sendFeedback(fb) {
   if (r.reward <= 0) companion.say(r.speak ? "learned" : "none_fit");
   renderImprovement(r);
   renderAgents(last.trace_summary, r.reflection);
+  $("sendCare").disabled = !r.speak;
   if (r.speak) {
     confirmed = r.speak;
     $("confirmedLabel").textContent = "Confirmed message:"; $("confirmedText").textContent = confirmed;
@@ -559,6 +560,16 @@ $("speak").addEventListener("click", async () => {
   companion.play(r, () => companion.state("idle", "Said it. Anything else?"));
 });
 $("stopSpeak").addEventListener("click", () => companion.stop());
+$("sendCare").addEventListener("click", async () => {
+  if (!confirmed) return;
+  $("sendCare").disabled = true; $("sendCare").textContent = "Sending…";
+  try {
+    const r = await api("/api/send", { interaction_id: last.interaction_id });
+    $("sendCare").textContent = r.ok ? "Sent ✓" : "Not sent";
+    notify(r.ok ? `Sent to #${localStorage.getItem("echoloop_channel") || "echoloop-messages"}: “${r.text}”` : "Could not send: " + (r.error || "unknown"));
+    companion.state("happy", r.ok ? "Sent to your caregiver." : "I could not send that.");
+  } catch (e) { $("sendCare").textContent = "Send to caregiver"; $("sendCare").disabled = false; notify(e.detail || "Send failed"); }
+});
 
 // ---------------- session recording (local file only; nothing is uploaded)
 let recorder = null, recChunks = [], recStreams = [];
