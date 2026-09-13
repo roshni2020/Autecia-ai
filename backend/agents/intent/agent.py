@@ -10,7 +10,7 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from ...integrations import gemini_text, op, parse_llm_json
+from ...integrations import llm_text, op, parse_llm_json
 from ...schemas import Candidate, IntentSet, MemoryHit, Perception
 
 BANK = Path(__file__).resolve().parents[3] / "data" / "phrasebank.txt"
@@ -27,8 +27,17 @@ CARRIERS = [
 
 
 class _LLMCandidates(BaseModel):
-    """Schema the Gemini candidate path must satisfy."""
-    candidates: list[str] = Field(min_length=2, max_length=4)
+    """Schema the LLM candidate path must satisfy (fail-closed)."""
+    candidates: list[str] = Field(min_length=2, max_length=6)
+
+
+SYSTEM = (
+    "You help a person finish a sentence they started but could not complete. "
+    "You never guess feelings, moods or diagnoses. You only use the words they said, "
+    "the objects visible, where they are pointing, and sentences they confirmed before. "
+    "Write short, plain, literal, first-person sentences a person would actually say out loud. "
+    "Return only JSON."
+)
 
 
 @lru_cache(maxsize=1)
@@ -97,17 +106,28 @@ def _offline(p: Perception, memories: list[MemoryHit], n: int) -> list[str]:
     return uniq[:n]
 
 
+LAST_PROVIDER = {"name": "offline-templates"}
+
+
 def _llm(p: Perception, memories: list[MemoryHit], n: int) -> list[str] | None:
-    objs = ", ".join(f"{o.label}" for o in p.objects) or "none"
-    mem = "; ".join(m.confirmed_text for m in memories) or "none"
+    objs = ", ".join(o.label for o in p.objects) or "none"
+    mem = "; ".join(f'"{m.confirmed_text}"' for m in memories) or "none"
+    seeds = "; ".join(f'"{t}"' for t in _offline(p, memories, 3)) or "none"
     prompt = (
-        f'A person said this incomplete utterance: "{p.transcript}".\n'
-        f"Objects visible: {objs}. Pointing at: {p.gesture.target or 'nothing'}.\n"
-        f"Sentences this same person confirmed before: {mem}.\n"
-        f"Give {n} short, plainly-worded, DIFFERENT complete sentences they might have "
-        "meant, first person. Use only the objects/actions given — invent nothing. "
-        'Return JSON: {"candidates": ["...", "..."]}')
-    parsed = parse_llm_json(gemini_text(prompt), _LLMCandidates)
+        f'Incomplete utterance, exactly as spoken: "{p.transcript}"\n'
+        f"Objects visible right now: {objs}\n"
+        f"Pointing at: {p.gesture.target or 'nothing'}\n"
+        f"Sentences this same person confirmed before: {mem}\n"
+        f"Weak template guesses (improve on these): {seeds}\n\n"
+        f"Give {n} DIFFERENT complete sentences they most plausibly meant, best first. "
+        "Rules: first person; under 10 words each; keep their own words where possible; "
+        "only mention objects that are visible or that they confirmed before; if they are "
+        "pointing at something, one candidate must be about that thing; one candidate may "
+        "be a general request such as asking for help, a break, or to leave. "
+        'Return JSON only: {"candidates": ["...", "..."]}')
+    raw, provider = llm_text(prompt, SYSTEM)
+    LAST_PROVIDER["name"] = provider
+    parsed = parse_llm_json(raw, _LLMCandidates)
     return parsed.candidates if parsed else None
 
 
@@ -115,8 +135,17 @@ def _llm(p: Perception, memories: list[MemoryHit], n: int) -> list[str] | None:
 def run(p: Perception, memories: list[MemoryHit], suggestion_count: int = 3) -> IntentSet:
     n = max(2, min(4, suggestion_count))
     texts = _llm(p, memories, n) or _offline(p, memories, n)
+    # Personalisation guarantee: a strong confirmed memory is always on the list.
+    for m in memories:
+        if m.similarity > 0.3 and m.confirmed_text.lower() not in {t.lower() for t in texts}:
+            texts = [m.confirmed_text] + texts
+            break
     if len(texts) < 2:
         texts = (texts + ["I need help.", "I want a break."])[:2]
+
+    # Tidy for speech: capital first letter, one terminal mark. Wording is untouched.
+    texts = [t.strip()[:1].upper() + t.strip()[1:] for t in texts if t.strip()]
+    texts = [t if t[-1] in ".?!" else t + "." for t in texts]
 
     cues = set(content_words(p.transcript))
     cands = []

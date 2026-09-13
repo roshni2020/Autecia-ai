@@ -60,7 +60,7 @@ def process(con, req: ProcessReq) -> dict:
 
     trace_summary = [
         f"Perception: {perception_agent.summary(perc)}",
-        f"Intent: generated {len(ranked)} candidate meanings",
+        f"Intent: generated {len(ranked)} candidate meanings via {intent_agent.LAST_PROVIDER['name']}",
         f"Learning: {learning_agent.summary(memories, ranked)}"
         + (f"; System One favours \"{judgment['choice']}\" "
            f"({int(judgment['confidence'] * 100)}% confidence)" if judgment else ""),
@@ -73,7 +73,7 @@ def process(con, req: ProcessReq) -> dict:
             "candidate_detail": [c.model_dump() for c in ranked],
             "top_candidate": ranked[0].text if ranked else None,
             "memory_matches": [m.model_dump() for m in memories],
-            "judgment": judgment,
+            "judgment": judgment, "intent_provider": intent_agent.LAST_PROVIDER["name"],
             "trace_summary": trace_summary, "agent_messages": bus,
             "policy_version": policy.version, "policy_weights": policy.as_dict(),
             "perception": perc.model_dump(), "latency_ms": latency_ms,

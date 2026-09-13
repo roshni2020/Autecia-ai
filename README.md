@@ -123,10 +123,11 @@ Everything degrades to a working offline path, so the demo never depends on a ne
 | --- | --- | --- |
 | **W&B Weave** | traces every agent call, interaction, reward, reflection | JSONL at `data/traces.jsonl` |
 | **W&B runs** | one run per evaluation: ablation table + headline metrics | report JSON only |
+| **W&B Inference** (CoreWeave-hosted) | the Intent agent's LLM: grounded, personal candidate sentences (`WANDB_INFERENCE_MODEL`, default Qwen3-14B-Instruct) | template generator |
 | **ElevenLabs** | speaking confirmed text | browser `speechSynthesis` |
 | **Gemini** | frame → visible objects + pointing (observable facts only) | scene box in the UI |
 | **TypeSafe AI** (System One, `jev`) | per-candidate "which one is meant?" probability → a bandit feature; failure-type classifier in Reflection | feature is 0; heuristic reflection |
-| **CoreWeave** | batch evaluation / inference host | local CPU, recorded in the report |
+| **CoreWeave** | serves the Intent LLM through W&B Inference; every live interaction is a measured CoreWeave workload | template generator, local CPU |
 
 Keys go in `.env` (git-ignored). Batch jobs set `ECHOLOOP_TRACE=0` — a span per agent call turns
 a 5,000-row replay into an hours-long job.

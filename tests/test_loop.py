@@ -6,6 +6,7 @@ import os
 
 os.environ.setdefault("ECHOLOOP_TRACE", "0")
 os.environ.setdefault("ECHOLOOP_TYPESAFE", "0")
+os.environ.setdefault("ECHOLOOP_LLM", "0")
 
 from backend import memory, pipeline  # noqa: E402
 from backend.bandit import Policy, initial_weights  # noqa: E402

@@ -13,7 +13,8 @@ import time
 from pathlib import Path
 
 os.environ.setdefault("ECHOLOOP_TRACE", "0")
-os.environ.setdefault("ECHOLOOP_TYPESAFE", "0")  # batch replay: no per-call spans
+os.environ.setdefault("ECHOLOOP_TYPESAFE", "0")
+os.environ.setdefault("ECHOLOOP_LLM", "0")  # batch replay: no per-call spans
 
 from backend import memory, pipeline  # noqa: E402
 from backend.integrations import log_trace, status, weave_init  # noqa: E402

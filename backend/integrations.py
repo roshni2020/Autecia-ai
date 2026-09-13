@@ -150,6 +150,45 @@ def gemini_text(prompt: str) -> str | None:
         return None
 
 
+# ---- W&B Inference (OpenAI-compatible chat endpoint, hosted on CoreWeave) ----
+LLM_ON = os.getenv("ECHOLOOP_LLM", "1") != "0"
+WANDB_INFERENCE_URL = "https://api.inference.wandb.ai/v1/chat/completions"
+DEFAULT_LLM = "OpenPipe/Qwen3-14B-Instruct"
+
+
+def llm_model() -> str:
+    return os.getenv("WANDB_INFERENCE_MODEL", DEFAULT_LLM)
+
+
+def wandb_inference(prompt: str, system: str = "", max_tokens: int = 220) -> str | None:
+    key = os.getenv("WANDB_API_KEY")
+    if not (LLM_ON and key):
+        return None
+    project = f"{os.getenv('WANDB_ENTITY', '')}/{os.getenv('WANDB_PROJECT', '')}".strip("/")
+    try:
+        r = httpx.post(WANDB_INFERENCE_URL, timeout=float(os.getenv("LLM_TIMEOUT", "8")),
+                       headers={"Authorization": f"Bearer {key}", "OpenAI-Project": project},
+                       json={"model": llm_model(), "max_tokens": max_tokens, "temperature": 0.4,
+                             "messages": ([{"role": "system", "content": system}] if system else [])
+                                         + [{"role": "user", "content": prompt}]})
+        r.raise_for_status()
+        return r.json()["choices"][0]["message"]["content"]
+    except Exception as e:
+        print(f"[wandb-inference] unavailable, falling back: {e}")
+        return None
+
+
+def llm_text(prompt: str, system: str = "") -> tuple[str | None, str]:
+    """(text, provider). W&B Inference first, Gemini second, None -> offline path."""
+    out = wandb_inference(prompt, system)
+    if out is not None:
+        return out, f"wandb-inference:{llm_model()}"
+    out = gemini_text(f"{system}\n\n{prompt}" if system else prompt)
+    if out is not None:
+        return out, f"gemini:{os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')}"
+    return None, "offline-templates"
+
+
 # ---- TypeSafe AI (System One: typed judgments + calibrated probabilities) ----
 # Off for batch replays unless asked: 25,000 network calls is not an evaluation run.
 TYPESAFE_ON = os.getenv("ECHOLOOP_TYPESAFE", "1") != "0"
@@ -183,6 +222,8 @@ def parse_llm_json(raw: str | None, model) -> Any | None:
 
 def status() -> dict:
     return {"weave": bool(os.getenv("WANDB_API_KEY")),
+            "wandb_inference": bool(LLM_ON and os.getenv("WANDB_API_KEY")),
+            "llm_model": llm_model() if (LLM_ON and os.getenv("WANDB_API_KEY")) else None,
             "elevenlabs": bool(os.getenv("ELEVENLABS_API_KEY")),
             "gemini": bool(os.getenv("GEMINI_API_KEY")),
             "typesafe": bool(os.getenv("TYPESAFE_API_KEY")),
