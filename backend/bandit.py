@@ -66,11 +66,12 @@ class Policy:
 def load(con, user_id: str, support_mode: str = "default") -> Policy:
     row = con.execute("SELECT * FROM policy WHERE user_id=?", (user_id,)).fetchone()
     if row:
-        w = np.array(json.loads(row["weights"]), dtype=np.float64)
-        if w.shape[0] != len(FEATURES):  # policy saved before a feature was added
-            fresh = initial_weights(support_mode)
-            fresh[: min(len(w), len(fresh))] = w[: len(fresh)]
-            w = fresh
+        saved = json.loads(row["weights"])
+        fresh = initial_weights(support_mode)
+        if isinstance(saved, dict):          # stored by name: new features keep their prior
+            w = np.array([saved.get(f, fresh[i]) for i, f in enumerate(FEATURES)], dtype=np.float64)
+        else:                                # legacy positional list: only trust an exact match
+            w = np.array(saved, dtype=np.float64) if len(saved) == len(FEATURES) else fresh
         return Policy(w, row["version"], row["updates"])
     return Policy(initial_weights(support_mode))
 
@@ -79,5 +80,6 @@ def save(con, user_id: str, p: Policy) -> None:
     con.execute("INSERT INTO policy(user_id,weights,version,updates) VALUES(?,?,?,?) "
                 "ON CONFLICT(user_id) DO UPDATE SET weights=excluded.weights,"
                 "version=excluded.version,updates=excluded.updates",
-                (user_id, json.dumps(list(p.w)), p.version, p.updates))
+                (user_id, json.dumps({f: float(x) for f, x in zip(FEATURES, p.w)}),
+                 p.version, p.updates))
     con.commit()

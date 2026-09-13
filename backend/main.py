@@ -1,4 +1,5 @@
 """EchoLoop API. Run: uvicorn backend.main:app --reload"""
+import os
 import uuid
 from pathlib import Path
 
@@ -90,6 +91,42 @@ def speak(req: SpeakReq):
     if audio is None:
         return {"fallback": "browser", "text": req.text}  # client speechSynthesis
     return Response(audio, media_type="audio/mpeg")
+
+
+# Companion lines are composed HERE, never sent by the client, so the companion
+# can only ever say a greeting, a status, or ask about a suggestion.
+COMPANION_LINES = {
+    "greeting": "Nice to meet you. I'm Echo. When you start a sentence and can't finish it, "
+                "I'll suggest a few ways to say it. You choose, and I'll say it out loud for you.",
+    "listening": "I'm listening. Take your time.",
+    "thinking": "Let me think about what you might mean.",
+    "none_fit": "Okay. Tell me in your own words and I'll remember it.",
+    "learned": "Got it. I'll remember that.",
+}
+
+
+class CompanionReq(BaseModel):
+    kind: str
+    interaction_id: str | None = None
+
+
+@app.post("/api/companion")
+def companion(req: CompanionReq):
+    if req.kind == "ask":
+        row = memory.get_interaction(con, req.interaction_id or "")
+        if row is None:
+            raise HTTPException(404, "unknown interaction")
+        import json
+        top = json.loads(row["observation"])["candidates"][0]["text"]
+        text = f"Do you mean: {top}"
+    elif req.kind in COMPANION_LINES:
+        text = COMPANION_LINES[req.kind]
+    else:
+        raise HTTPException(400, "unknown companion line")
+    audio = tts(text, voice=os.getenv("ELEVENLABS_COMPANION_VOICE_ID"))
+    if audio is None:
+        return {"fallback": "browser", "text": text}
+    return Response(audio, media_type="audio/mpeg", headers={"X-Text": text})
 
 
 @app.get("/api/history/{user_id}")

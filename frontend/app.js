@@ -87,6 +87,7 @@ document.querySelectorAll(".mode").forEach((b) => b.addEventListener("click", as
   applyProfile(r.profile, r.quick_phrases);
   notify("Preferences saved. This is your choice, never a diagnosis.");
   showTab("live");
+  companion.say("greeting", true);
 }));
 
 function applyProfile(p, quick) {
@@ -106,6 +107,79 @@ async function saveProfile(patch) {
   await api(`/api/profile/${USER}`, profile);
 }
 
+// ---------------- Echo, the companion. Speaks only server-composed lines in its own
+// voice; the user's message is still only ever spoken after an explicit Yes.
+const companion = {
+  el: null, mouth: null, pupils: [], audioCtx: null, analyser: null, raf: null, speaking: null,
+  init() {
+    this.el = $("companion"); this.mouth = this.el.querySelector(".echo-mouth");
+    this.pupils = [...this.el.querySelectorAll(".echo-pupil")];
+    const svg = this.el.querySelector(".echo");
+    document.addEventListener("mousemove", (e) => {           // 3D-ish tilt + eye tracking
+      const r = svg.getBoundingClientRect(), dx = (e.clientX - (r.left + r.width / 2)) / r.width, dy = (e.clientY - (r.top + r.height / 2)) / r.height;
+      svg.style.setProperty("--ry", `${Math.max(-1, Math.min(1, dx)) * 18}deg`);
+      svg.style.setProperty("--rx", `${-Math.max(-1, Math.min(1, dy)) * 12}deg`);
+      this.look(dx, dy);
+    });
+    $("companionSpeakBtn").addEventListener("click", () => this.say("greeting", true));
+    $("companionMute").addEventListener("click", () => this.setVoice(!this.voiceOn()));
+    this.setVoice(this.voiceOn());
+  },
+  voiceOn() { return localStorage.getItem("echoloop_companion") !== "0"; },
+  setVoice(on) {
+    localStorage.setItem("echoloop_companion", on ? "1" : "0");
+    $("companionMute").textContent = on ? "Voice on" : "Voice off";
+    $("companionMute").setAttribute("aria-pressed", String(!on));
+    if (!on) this.stop();
+  },
+  look(dx, dy) { this.pupils.forEach((p) => (p.style.transform = `translate(${dx * 4}px, ${dy * 3}px)`)); },
+  state(s, line) { this.el.dataset.state = s; if (line) $("companionLine").textContent = line; },
+  mouthOpen(a) {                                              // a: 0..1 amplitude
+    const y = 124 + 14 * a, w = 16 - 4 * a;
+    this.mouth.setAttribute("d", `M${100 - w} 124 Q100 ${y} ${100 + w} 124`);
+  },
+  stop() {
+    if (this.speaking) { this.speaking.pause(); this.speaking = null; }
+    speechSynthesis.cancel(); cancelAnimationFrame(this.raf); this.mouthOpen(0);
+    if (this.el.dataset.state === "speaking") this.state("idle");
+  },
+  async say(kind, force = false, interaction_id = null) {
+    if (!force && !this.voiceOn()) return;
+    if (!force && profile && ["autism_neurodivergent", "cognitive_fatigue"].includes(profile.support_mode) && kind !== "ask") return; // fewer interruptions
+    this.stop();
+    let r;
+    try {
+      r = await fetch("/api/companion", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, interaction_id }) });
+      if (!r.ok) return;
+    } catch { return; }
+    const isAudio = (r.headers.get("content-type") || "").includes("audio");
+    const text = isAudio ? r.headers.get("X-Text") : (await r.json()).text;
+    this.state("speaking", text);
+    if (isAudio) {
+      const a = new Audio(URL.createObjectURL(await r.blob())); this.speaking = a;
+      this.animateFromAudio(a); a.onended = () => { this.mouthOpen(0); this.state("idle"); };
+      a.play().catch(() => this.state("idle"));
+    } else {
+      const u = new SpeechSynthesisUtterance(text); u.rate = +(localStorage.getItem("echoloop_rate") || 1);
+      let t = 0; const tick = () => { this.mouthOpen(0.35 + 0.35 * Math.abs(Math.sin(t += 0.45))); this.raf = requestAnimationFrame(tick); };
+      u.onstart = tick; u.onend = () => { cancelAnimationFrame(this.raf); this.mouthOpen(0); this.state("idle"); };
+      speechSynthesis.speak(u);
+    }
+  },
+  animateFromAudio(audioEl) {                                 // real lip-sync from amplitude
+    try {
+      this.audioCtx = this.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+      const src = this.audioCtx.createMediaElementSource(audioEl);
+      this.analyser = this.audioCtx.createAnalyser(); this.analyser.fftSize = 256;
+      src.connect(this.analyser); this.analyser.connect(this.audioCtx.destination);
+      const buf = new Uint8Array(this.analyser.frequencyBinCount);
+      const tick = () => { this.analyser.getByteTimeDomainData(buf); let s = 0; for (const v of buf) s += Math.abs(v - 128); this.mouthOpen(Math.min(1, (s / buf.length) / 18)); this.raf = requestAnimationFrame(tick); };
+      tick();
+    } catch { /* no analyser: mouth stays still, audio still plays */ }
+  },
+};
+companion.init();
+
 // ---------------- settings
 function fillSettings() {
   if (!profile) return;
@@ -113,11 +187,13 @@ function fillSettings() {
   $("countSetting").value = String(profile.suggestion_count);
   $("quickSetting").checked = profile.quick_phrases_enabled;
   $("literalSetting").checked = profile.literal_language;
+  $("companionSetting").checked = companion.voiceOn();
   $("voiceSpeed").value = localStorage.getItem("echoloop_rate") || "1";
 }
 $("settingsForm").addEventListener("submit", async (e) => {
   e.preventDefault();
   localStorage.setItem("echoloop_rate", $("voiceSpeed").value);
+  companion.setVoice($("companionSetting").checked);
   await saveProfile({
     pause_tolerance: $("pauseSetting").value,
     suggestion_count: +$("countSetting").value,
@@ -148,8 +224,13 @@ const loadScript = (src) => new Promise((ok, fail) => {
 
 async function loadVision() {
   if (detector) return;
-  $("sceneSummary").textContent = "Loading object detector…";
+  $("sceneSummary").textContent = "Loading object detector (first time ~10 s)…";
   await loadScript(CDN.tf); await loadScript(CDN.coco);
+  try { await tf.ready(); } catch {}
+  if (tf.getBackend && tf.getBackend() !== "webgl") {         // no GPU path: use CPU, slower but works
+    try { await tf.setBackend("cpu"); await tf.ready(); } catch {}
+  }
+  $("sceneSummary").textContent = `Loading object model (${tf.getBackend ? tf.getBackend() : "?"})…`;
   detector = await cocoSsd.load({ base: "lite_mobilenet_v2" });
   try {
     await loadScript(CDN.hands);
@@ -244,8 +325,13 @@ async function startCamera() {
   $("cameraStatus").textContent = "LIVE"; $("cameraStatus").classList.add("live");
   if (profile && !profile.camera_enabled) saveProfile({ camera_enabled: true });
   try { await loadVision(); }
-  catch (e) { notify("Object detection failed to load: " + e.message); $("sceneSummary").textContent = "Camera on · detection unavailable"; return; }
-  detectTimer = setInterval(() => detectLoop().catch((e) => console.warn(e)), 450);
+  catch (e) {
+    console.error("vision load failed", e);
+    $("sceneSummary").innerHTML = `Detection failed: <code>${esc(e.message || e)}</code> <button type="button" id="retryVision" class="button compact">Retry</button>`;
+    $("retryVision").onclick = () => { detector = null; startCamera(); };
+    return;
+  }
+  detectTimer = setInterval(() => detectLoop().catch((e) => { console.warn(e); $("sceneSummary").textContent = "Detection error: " + (e.message || e); }), 450);
 }
 function stopCamera() {
   clearInterval(detectTimer); detectTimer = null;
@@ -289,9 +375,10 @@ $("mic").addEventListener("click", () => {
   let timer;
   const bump = () => { clearTimeout(timer); timer = setTimeout(() => rec && rec.stop(), wait); };
   rec.onresult = (e) => { let t = ""; for (const r of e.results) t += r[0].transcript; $("fragment").value = t; bump(); };
-  rec.onend = () => { rec = null; $("mic").classList.remove("on"); $("micLabel").textContent = "Mic off"; $("listenStatus").textContent = "Ready"; $("listenStatus").className = "pill grey"; if ($("fragment").value.trim()) process(); };
+  rec.onend = () => { rec = null; companion.state("idle"); $("mic").classList.remove("on"); $("micLabel").textContent = "Mic off"; $("listenStatus").textContent = "Ready"; $("listenStatus").className = "pill grey"; if ($("fragment").value.trim()) process(); };
   rec.onerror = (e) => notify("Microphone: " + e.error);
   rec.start(); bump();
+  companion.state("listening", "I'm listening. Take your time.");
   $("mic").classList.add("on"); $("micLabel").textContent = "Mic on";
   $("listenStatus").textContent = "Listening…"; $("listenStatus").className = "pill";
 });
@@ -304,6 +391,7 @@ async function process() {
   const transcript = $("fragment").value.trim();
   if (!transcript) return;
   $("cands").innerHTML = '<div class="candidate-empty"><p>Thinking…</p></div>';
+  companion.state("thinking", "Let me think about what you might mean…");
   $("confirmRow").classList.add("hidden");
   const useScene = $("sceneEnabled").checked;
   const liveLabels = [...new Set(live.objects.map((o) => o.label))];   // live camera wins over the manual box
@@ -318,6 +406,8 @@ async function process() {
     });
   } catch (e) { notify(e.detail || "Could not reach EchoLoop"); return; }
   selected = 0; confirmed = null;
+  companion.state("idle", `Do you mean: ${last.top_candidate}`);
+  companion.say("ask", false, last.interaction_id);
   renderPerception(last.perception);
   renderCandidates();
   renderAgents(last.trace_summary, null);
@@ -399,6 +489,8 @@ async function sendFeedback(fb) {
   try { r = await api("/interaction/feedback", { interaction_id: last.interaction_id, elapsed_ms: 0, ...fb }); }
   catch (e) { notify(e.detail || "Feedback failed"); return; }
   $("confirmRow").classList.add("hidden");
+  companion.state(r.reward > 0 ? "happy" : "idle", r.reward > 0 ? "Great. Want me to say it out loud?" : r.speak ? "Got it. I'll remember that." : "Okay. Tell me in your own words next time.");
+  if (r.reward <= 0) companion.say(r.speak ? "learned" : "none_fit");
   renderImprovement(r);
   renderAgents(last.trace_summary, r.reflection);
   if (r.speak) {
@@ -433,6 +525,7 @@ function renderImprovement(r) {
 // ---------------- speech out: confirmed text only
 $("speak").addEventListener("click", async () => {
   if (!confirmed) return;
+  companion.stop();
   const r = await fetch("/api/speak", { method: "POST", headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ text: confirmed, interaction_id: last.interaction_id }) });
   if ((r.headers.get("content-type") || "").includes("audio")) {
@@ -493,7 +586,8 @@ async function loadEval() {
     $("userId").value = USER;
     const p = await api(`/api/profile/${USER}`);
     applyProfile(p.profile, p.quick_phrases);
-    showTab(location.hash.replace("#", "") || "live");
+    const h = location.hash.replace("#", "");
+    showTab(h && h !== "onboarding" && TITLES[h] ? h : "live");
   } else {
     showTab("onboarding");
   }

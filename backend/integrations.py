@@ -87,17 +87,21 @@ def log_trace(name: str, payload: dict, force: bool = False) -> None:
 
 # ---- ElevenLabs -------------------------------------------------------------
 
-def tts(text: str) -> bytes | None:
-    """Confirmed text only. Returns mp3 bytes, or None -> browser speaks it."""
+def tts(text: str, voice: str | None = None) -> bytes | None:
+    """Returns mp3 bytes, or None -> browser speaks it. Callers gate what may be spoken."""
     key = os.getenv("ELEVENLABS_API_KEY")
     if not key:
         return None
-    voice = os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
-    r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
-                   headers={"xi-api-key": key}, timeout=30,
-                   json={"text": text, "model_id": "eleven_turbo_v2_5"})
-    r.raise_for_status()
-    return r.content
+    voice = voice or os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+    try:
+        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
+                       headers={"xi-api-key": key}, timeout=30,
+                       json={"text": text, "model_id": "eleven_turbo_v2_5"})
+        r.raise_for_status()
+        return r.content
+    except Exception as e:  # quota (402), network, bad voice id: browser voice instead
+        print(f"[elevenlabs] falling back to browser voice: {e}")
+        return None
 
 
 # ---- Gemini (perception only: observable facts, never internal state) -------
