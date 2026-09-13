@@ -41,6 +41,7 @@ const ICONS = {
   database: '<ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v14c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 12c0 1.7 3.6 3 8 3s8-1.3 8-3"/>',
   volume: '<path d="M4 9v6h4l5 4V5L8 9z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/>',
   stop: '<rect x="6" y="6" width="12" height="12" rx="2"/>',
+  record: '<circle cx="12" cy="12" r="6"/>',
 };
 
 const $ = (id) => document.getElementById(id);
@@ -110,19 +111,18 @@ async function saveProfile(patch) {
 // ---------------- Echo, the companion. Speaks only server-composed lines in its own
 // voice; the user's message is still only ever spoken after an explicit Yes.
 const companion = {
-  el: null, mouth: null, pupils: [], audioCtx: null, analyser: null, raf: null, speaking: null,
+  el: null, mouth: null, pupils: [], raf: null, utter: null,
   init() {
     this.el = $("companion"); this.mouth = this.el.querySelector(".echo-mouth");
     this.pupils = [...this.el.querySelectorAll(".echo-pupil")];
-    const svg = this.el.querySelector(".echo");
-    document.addEventListener("mousemove", (e) => {           // 3D-ish tilt + eye tracking
-      const r = svg.getBoundingClientRect(), dx = (e.clientX - (r.left + r.width / 2)) / r.width, dy = (e.clientY - (r.top + r.height / 2)) / r.height;
-      svg.style.setProperty("--ry", `${Math.max(-1, Math.min(1, dx)) * 18}deg`);
-      svg.style.setProperty("--rx", `${-Math.max(-1, Math.min(1, dy)) * 12}deg`);
-      this.look(dx, dy);
-    });
     $("companionSpeakBtn").addEventListener("click", () => this.say("greeting", true));
     $("companionMute").addEventListener("click", () => this.setVoice(!this.voiceOn()));
+    $("avatarUrl").value = localStorage.getItem("echoloop_avatar") || "";
+    $("avatarUrl").addEventListener("change", () => {
+      const u = $("avatarUrl").value.trim();
+      if (u) localStorage.setItem("echoloop_avatar", u); else localStorage.removeItem("echoloop_avatar");
+      location.reload();
+    });
     this.setVoice(this.voiceOn());
   },
   voiceOn() { return localStorage.getItem("echoloop_companion") !== "0"; },
@@ -132,50 +132,42 @@ const companion = {
     $("companionMute").setAttribute("aria-pressed", String(!on));
     if (!on) this.stop();
   },
-  look(dx, dy) { this.pupils.forEach((p) => (p.style.transform = `translate(${dx * 4}px, ${dy * 3}px)`)); },
-  state(s, line) { this.el.dataset.state = s; if (line) $("companionLine").textContent = line; },
-  mouthOpen(a) {                                              // a: 0..1 amplitude
-    const y = 124 + 14 * a, w = 16 - 4 * a;
-    this.mouth.setAttribute("d", `M${100 - w} 124 Q100 ${y} ${100 + w} 124`);
+  state(s, line) {
+    this.el.dataset.state = s; if (line) $("companionLine").textContent = line;
+    if (s === "listening" && window.EchoHead) EchoHead.attend(4000);
   },
+  mouthOpen(a) { if (!this.mouth) return; const y = 124 + 14 * a, w = 16 - 4 * a; this.mouth.setAttribute("d", `M${100 - w} 124 Q100 ${y} ${100 + w} 124`); },
   stop() {
-    if (this.speaking) { this.speaking.pause(); this.speaking = null; }
+    if (window.EchoHead) EchoHead.stop();
     speechSynthesis.cancel(); cancelAnimationFrame(this.raf); this.mouthOpen(0);
     if (this.el.dataset.state === "speaking") this.state("idle");
+  },
+  // Plays server-returned speech through the avatar; browser voice if none.
+  async play(r, onend) {
+    const rate = +(localStorage.getItem("echoloop_rate") || 1);
+    if (r.audio_base64 && window.EchoHead && EchoHead.isReady()) {
+      await EchoHead.speak(r.audio_base64, r.words, r.wtimes, r.wdurations);
+      const total = (r.wtimes.at(-1) || 0) + (r.wdurations.at(-1) || 0) + 300;
+      setTimeout(onend, total);
+      return;
+    }
+    if (r.audio_base64) {                        // no 3D head: plain playback
+      const a = new Audio("data:audio/mpeg;base64," + r.audio_base64); a.onended = onend; a.play().catch(onend); return;
+    }
+    const u = new SpeechSynthesisUtterance(r.text); u.rate = rate; this.utter = u;
+    if (window.EchoHead && EchoHead.isReady()) EchoHead.speakSilent(r.text, rate);
+    else { let t = 0; const tick = () => { this.mouthOpen(0.35 + 0.35 * Math.abs(Math.sin(t += 0.45))); this.raf = requestAnimationFrame(tick); }; u.onstart = tick; }
+    u.onend = () => { cancelAnimationFrame(this.raf); this.mouthOpen(0); onend(); };
+    speechSynthesis.speak(u);
   },
   async say(kind, force = false, interaction_id = null) {
     if (!force && !this.voiceOn()) return;
     if (!force && profile && ["autism_neurodivergent", "cognitive_fatigue"].includes(profile.support_mode) && kind !== "ask") return; // fewer interruptions
     this.stop();
     let r;
-    try {
-      r = await fetch("/api/companion", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, interaction_id }) });
-      if (!r.ok) return;
-    } catch { return; }
-    const isAudio = (r.headers.get("content-type") || "").includes("audio");
-    const text = isAudio ? r.headers.get("X-Text") : (await r.json()).text;
-    this.state("speaking", text);
-    if (isAudio) {
-      const a = new Audio(URL.createObjectURL(await r.blob())); this.speaking = a;
-      this.animateFromAudio(a); a.onended = () => { this.mouthOpen(0); this.state("idle"); };
-      a.play().catch(() => this.state("idle"));
-    } else {
-      const u = new SpeechSynthesisUtterance(text); u.rate = +(localStorage.getItem("echoloop_rate") || 1);
-      let t = 0; const tick = () => { this.mouthOpen(0.35 + 0.35 * Math.abs(Math.sin(t += 0.45))); this.raf = requestAnimationFrame(tick); };
-      u.onstart = tick; u.onend = () => { cancelAnimationFrame(this.raf); this.mouthOpen(0); this.state("idle"); };
-      speechSynthesis.speak(u);
-    }
-  },
-  animateFromAudio(audioEl) {                                 // real lip-sync from amplitude
-    try {
-      this.audioCtx = this.audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-      const src = this.audioCtx.createMediaElementSource(audioEl);
-      this.analyser = this.audioCtx.createAnalyser(); this.analyser.fftSize = 256;
-      src.connect(this.analyser); this.analyser.connect(this.audioCtx.destination);
-      const buf = new Uint8Array(this.analyser.frequencyBinCount);
-      const tick = () => { this.analyser.getByteTimeDomainData(buf); let s = 0; for (const v of buf) s += Math.abs(v - 128); this.mouthOpen(Math.min(1, (s / buf.length) / 18)); this.raf = requestAnimationFrame(tick); };
-      tick();
-    } catch { /* no analyser: mouth stays still, audio still plays */ }
+    try { r = await api("/api/companion", { kind, interaction_id }); } catch { return; }
+    this.state("speaking", r.text);
+    this.play(r, () => this.state("idle"));
   },
 };
 companion.init();
@@ -526,17 +518,41 @@ function renderImprovement(r) {
 $("speak").addEventListener("click", async () => {
   if (!confirmed) return;
   companion.stop();
-  const r = await fetch("/api/speak", { method: "POST", headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ text: confirmed, interaction_id: last.interaction_id }) });
-  if ((r.headers.get("content-type") || "").includes("audio")) {
-    audio = new Audio(URL.createObjectURL(await r.blob())); audio.play();
-  } else {
-    const u = new SpeechSynthesisUtterance(confirmed);
-    u.rate = +(localStorage.getItem("echoloop_rate") || 1);
-    speechSynthesis.speak(u);
-  }
+  let r;
+  try { r = await api("/api/speak", { text: confirmed, interaction_id: last.interaction_id }); }
+  catch (e) { notify(e.detail || "Could not speak"); return; }
+  companion.state("speaking", confirmed);
+  companion.play(r, () => companion.state("idle", "Said it. Anything else?"));
 });
-$("stopSpeak").addEventListener("click", () => { speechSynthesis.cancel(); if (audio) audio.pause(); });
+$("stopSpeak").addEventListener("click", () => companion.stop());
+
+// ---------------- session recording (local file only; nothing is uploaded)
+let recorder = null, recChunks = [], recStreams = [];
+$("recBtn").addEventListener("click", async () => {
+  if (recorder) { recorder.stop(); return; }
+  try {
+    const screen = await navigator.mediaDevices.getDisplayMedia({ video: { frameRate: 30 }, audio: true, preferCurrentTab: true, selfBrowserSurface: "include" });
+    let mic = null; try { mic = await navigator.mediaDevices.getUserMedia({ audio: true }); } catch {}
+    recStreams = [screen, mic].filter(Boolean);
+    const ctx = new AudioContext(), dest = ctx.createMediaStreamDestination();
+    for (const st of recStreams) if (st.getAudioTracks().length) ctx.createMediaStreamSource(st).connect(dest);
+    const mixed = new MediaStream([...screen.getVideoTracks(), ...dest.stream.getAudioTracks()]);
+    recChunks = [];
+    recorder = new MediaRecorder(mixed, { mimeType: MediaRecorder.isTypeSupported("video/webm;codecs=vp9,opus") ? "video/webm;codecs=vp9,opus" : "video/webm" });
+    recorder.ondataavailable = (e) => e.data.size && recChunks.push(e.data);
+    recorder.onstop = () => {
+      recStreams.forEach((st) => st.getTracks().forEach((t) => t.stop()));
+      const blob = new Blob(recChunks, { type: "video/webm" });
+      const a = document.createElement("a"); a.href = URL.createObjectURL(blob);
+      a.download = `echoloop-session-${new Date().toISOString().replace(/[:.]/g, "-")}.webm`; a.click();
+      recorder = null; $("recBtn").classList.remove("rec"); $("recLabel").textContent = "Record";
+      notify("Recording saved to your downloads. It never left this device.");
+    };
+    screen.getVideoTracks()[0].onended = () => recorder && recorder.stop();
+    recorder.start(1000);
+    $("recBtn").classList.add("rec"); $("recLabel").textContent = "Stop recording";
+  } catch (e) { notify("Recording not started: " + e.message); }
+});
 
 // ---------------- history / evaluation
 async function loadHistory() {

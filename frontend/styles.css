@@ -249,3 +249,12 @@ dialog textarea{width:100%;border:1px solid var(--line);border-radius:10px;paddi
 .suggest-column{display:flex;flex-direction:column;gap:14px;min-width:0}
 .companion-panel{align-self:stretch}
 .companion-copy p{min-height:0}
+
+/* 3D avatar */
+.avatar-stage{position:absolute;inset:0;border-radius:50%;overflow:hidden;background:radial-gradient(circle at 50% 35%,#f4f7ff,#dfe8ff);display:grid;place-items:center}
+.avatar-stage canvas{width:100%!important;height:100%!important;display:block}
+.avatar-loading{font-size:.8rem;color:var(--muted)}
+.avatar-pick{display:flex;align-items:center;gap:6px;font-size:.78rem;color:var(--muted);flex:1;min-width:200px}
+.avatar-pick input{flex:1;border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:.78rem}
+.status-chip.rec{color:var(--red)}
+.status-chip.rec [data-icon]{animation:echo-antenna 1s infinite}

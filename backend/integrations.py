@@ -87,19 +87,44 @@ def log_trace(name: str, payload: dict, force: bool = False) -> None:
 
 # ---- ElevenLabs -------------------------------------------------------------
 
-def tts(text: str, voice: str | None = None) -> bytes | None:
-    """Returns mp3 bytes, or None -> browser speaks it. Callers gate what may be spoken."""
+# Premade voices work on the free tier; library voices do not (402). Calm, neutral defaults.
+USER_VOICE = "SAz9YHcvj6GT2YYXdXww"       # River - relaxed, neutral
+COMPANION_VOICE = "EXAVITQu4vr4xnSDxMaL"  # Sarah - mature, reassuring
+
+
+def tts(text: str, voice: str | None = None) -> dict | None:
+    """Speech with word timings for avatar lip-sync.
+
+    Returns {"audio_base64", "words", "wtimes", "wdurations"} (ms) or None so the
+    caller falls back to the browser voice. Callers gate WHAT may be spoken.
+    """
     key = os.getenv("ELEVENLABS_API_KEY")
     if not key:
         return None
-    voice = voice or os.getenv("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+    voice = voice or os.getenv("ELEVENLABS_VOICE_ID", USER_VOICE)
     try:
-        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice}",
+        r = httpx.post(f"https://api.elevenlabs.io/v1/text-to-speech/{voice}/with-timestamps",
                        headers={"xi-api-key": key}, timeout=30,
                        json={"text": text, "model_id": "eleven_turbo_v2_5"})
         r.raise_for_status()
-        return r.content
-    except Exception as e:  # quota (402), network, bad voice id: browser voice instead
+        body = r.json()
+        al = body["alignment"]
+        words, wtimes, wdur, cur, start, end = [], [], [], "", None, None
+        for ch, t0, t1 in zip(al["characters"], al["character_start_times_seconds"],
+                              al["character_end_times_seconds"]):
+            if ch.isspace():
+                if cur:
+                    words.append(cur); wtimes.append(int(start * 1000)); wdur.append(int((end - start) * 1000))
+                cur, start = "", None
+                continue
+            if start is None:
+                start = t0
+            cur += ch; end = t1
+        if cur:
+            words.append(cur); wtimes.append(int(start * 1000)); wdur.append(int((end - start) * 1000))
+        return {"audio_base64": body["audio_base64"], "words": words,
+                "wtimes": wtimes, "wdurations": wdur}
+    except Exception as e:  # quota, network, bad voice id: browser voice instead
         print(f"[elevenlabs] falling back to browser voice: {e}")
         return None
 

@@ -8,7 +8,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 from . import bandit, memory
-from .integrations import status, tts, weave_init
+from .integrations import COMPANION_VOICE, status, tts, weave_init
 from .pipeline import feedback as run_feedback
 from .pipeline import process as run_process
 from .schemas import SUPPORT_MODES, FeedbackReq, ProcessReq, StartReq, SupportProfile
@@ -87,10 +87,10 @@ def speak(req: SpeakReq):
         row = memory.get_interaction(con, req.interaction_id)
         if row is None or not row["feedback"]:
             raise HTTPException(409, "text is not confirmed yet")
-    audio = tts(req.text)
-    if audio is None:
+    speech = tts(req.text)
+    if speech is None:
         return {"fallback": "browser", "text": req.text}  # client speechSynthesis
-    return Response(audio, media_type="audio/mpeg")
+    return {"text": req.text, **speech}
 
 
 # Companion lines are composed HERE, never sent by the client, so the companion
@@ -123,10 +123,10 @@ def companion(req: CompanionReq):
         text = COMPANION_LINES[req.kind]
     else:
         raise HTTPException(400, "unknown companion line")
-    audio = tts(text, voice=os.getenv("ELEVENLABS_COMPANION_VOICE_ID"))
-    if audio is None:
+    speech = tts(text, voice=os.getenv("ELEVENLABS_COMPANION_VOICE_ID", COMPANION_VOICE))
+    if speech is None:
         return {"fallback": "browser", "text": text}
-    return Response(audio, media_type="audio/mpeg", headers={"X-Text": text})
+    return {"text": text, **speech}
 
 
 @app.get("/api/history/{user_id}")
