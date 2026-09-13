@@ -1,7 +1,8 @@
 ﻿<!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#eef3ff"><title>EchoLoop — Your words, your way</title><link rel="stylesheet" href="/styles.css"><script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js/+esm","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/","talkinghead":"https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.7/modules/talkinghead.mjs"}}</script><script type="module" src="/avatar.mjs"></script><script defer src="/app.js"></script></head>
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#eef3ff"><title>EchoLoop — Your words, your way</title><link rel="stylesheet" href="/styles.css?v=spatial-1"><script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js/+esm","three/addons/":"https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/","talkinghead":"https://cdn.jsdelivr.net/gh/met4citizen/TalkingHead@1.7/modules/talkinghead.mjs"}}</script><script type="module" src="/avatar.mjs"></script><script defer src="/app.js"></script><link rel="stylesheet" href="/spatial.css?v=1"><script type="module" src="/spatial.mjs?v=1"></script><script defer src="/accessibility.js?v=1"></script></head>
 <body>
+<a class="skip-link" href="#mainContent">Skip to communication controls</a>
 <div class="app-shell">
 <aside class="sidebar">
 <a href="#live" class="brand"><span class="brand-mark">∞</span>EchoLoop</a><div class="nav-label">YOUR SPACE</div>
@@ -15,8 +16,9 @@
 </nav>
 <div class="sidebar-bottom"><div class="gentle-note"><span data-icon="heart"></span><p>Small steps.<br><strong>Big conversations.</strong></p><span class="note-spark">✧</span></div><button class="user-card" data-tab="onboarding"><span class="avatar" id="avatar">Y</span><span><strong id="userName">Your space</strong><small id="modeBadge">Personal communication</small></span><span>›</span></button></div>
 </aside>
-<main>
+<main id="mainContent" tabindex="-1">
 <header class="page-header"><div><div class="eyebrow">YOUR WORDS. YOUR WAY.</div><h1 id="pageTitle">Live communication</h1><p id="pageSubtitle">A little context. A clearer connection.</p></div><div class="header-note">Different ways to say<br><span>the same amazing you.</span><i></i></div></header>
+<div class="access-toolbar" role="group" aria-label="Accessibility preferences"><span>Make yourself comfortable</span><button id="largeText" type="button" aria-pressed="false">Larger text</button><button id="highContrast" type="button" aria-pressed="false">High contrast</button><button id="reduceMotion" type="button" aria-pressed="false">Pause motion</button></div>
 <div id="notice" class="notice hidden" role="status"></div>
 <section id="tab-live" class="view">
 <div class="live-grid">

@@ -16,7 +16,7 @@ def _repetition(words: list[str]) -> bool:
     return any(a == b for a, b in zip(words, words[1:]) if a not in FILLERS)
 
 
-@op
+@op(name="perception_agent.run")
 def run(req: ProcessReq, camera_enabled: bool, speech: SpeechObservations | None = None) -> Perception:
     """Observable facts from speech + scene. Speech observations (Whisper words,
     VAD pauses, fillers, repetition) are used as given; nothing is inferred

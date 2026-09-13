@@ -1,4 +1,5 @@
 """Agent-to-agent orchestration (spec §7). Shared by the API and the evaluator."""
+import contextvars
 import time
 import uuid
 
@@ -7,8 +8,13 @@ from .agents import intent as intent_agent
 from .agents import learning as learning_agent
 from .agents import perception as perception_agent
 from .agents import reflection as reflection_agent
-from .integrations import log_trace
+from .integrations import log_trace, op
 from .schemas import AgentMessage, FeedbackReq, ProcessReq
+
+# The DB connection and the raw request (base64 audio / frame) never go through
+# an op signature: they are passed via a context variable and the root op only
+# records the small, meaningful inputs.
+_ctx: contextvars.ContextVar[tuple] = contextvars.ContextVar("echoloop_ctx")
 from .speech import analyze_audio
 from .speech.audio import decode_data_url
 from .speech.schemas import SpeechAnalysis
@@ -37,6 +43,18 @@ def _msg(mtype, frm, to, payload) -> dict:
 
 
 def process(con, req: ProcessReq) -> dict:
+    token = _ctx.set((con, req))
+    try:
+        return _process(req.user_id, req.session_id, req.transcript, req.scene_hint,
+                        req.pointing_hint, bool(req.audio), bool(req.frame))
+    finally:
+        _ctx.reset(token)
+
+
+@op(name="echoloop.process")
+def _process(user_id: str, session_id: str | None, transcript: str, scene_hint: list[str],
+             pointing_hint: str | None, audio: bool, frame: bool) -> dict:
+    con, req = _ctx.get()
     t0 = time.perf_counter()
     profile = memory.get_profile(con, req.user_id)
     policy = bandit.load(con, req.user_id, profile.support_mode)
@@ -49,38 +67,34 @@ def process(con, req: ProcessReq) -> dict:
     if obs and obs.transcript.strip() and obs.providers.get("asr", "client") != "client":
         req.transcript = obs.transcript          # server ASR is the primary path
 
-    with agent_trace.turn(session_id, req.user_id, req.transcript, "suggest") as t:
-        with agent_trace.subagent(t, "perception_agent", {"transcript": req.transcript,
-                                  "scene": req.scene_hint, "pointing": req.pointing_hint,
-                                  "speech": obs.model_dump(exclude={"words"}) if obs else None},
-                                  "Observable facts from speech + scene") as span:
-            perc = perception_agent.run(req, profile.camera_enabled, speech=obs)
-            span["output"] = perc.model_dump(exclude={"speech"})
-        query = f"{perc.transcript} {perception_agent.visual_summary(perc)}"
-        utterance = analysis.fused_embedding if analysis else None
-        memories = memory.search(con, req.user_id, query, k=3, utterance=utterance)
-        with agent_trace.subagent(t, "intent_agent", {"perception": perception_agent.summary(perc),
-                                  "memories": [m.confirmed_text for m in memories]},
-                                  "2-4 candidate meanings + none-fit") as span:
-            intents = intent_agent.run(perc, memories, profile.suggestion_count)
-            span["output"] = [c.text for c in intents.candidates]
-            from .integrations import LAST_LLM
-            if LAST_LLM.get("output") is not None:
-                agent_trace.llm_span(t, LAST_LLM["model"], LAST_LLM["provider"], LAST_LLM["prompt"],
-                                     LAST_LLM["system"], LAST_LLM["output"], LAST_LLM["usage"])
-        with agent_trace.subagent(t, "learning_agent", {"candidates": [c.text for c in intents.candidates],
-                                  "policy_version": policy.version},
-                                  "Memory retrieval + contextual-bandit reranking") as span:
-            judgment = learning_agent.judge(perc, memories, [c.text for c in intents.candidates])
-            if judgment:
-                agent_trace.tool_span(t, "typesafe.system_one", {"question": "which candidate is meant"},
-                                      judgment)
-            ranked = learning_agent.rerank(intents, perc, memories, policy, judgment)
-            span["output"] = [{"text": c.text, "score": c.score} for c in ranked]
-        if t is not None:
-            import weave
-            t.record(output_messages=[weave.Message(role="assistant",
-                                                    content=f"Do you mean: {ranked[0].text}" if ranked else "")])
+    sess = agent_trace.session(session_id, req.user_id)
+    with agent_trace.turn(sess, "perception_agent", req.transcript,
+                          {"scene": req.scene_hint, "pointing": req.pointing_hint,
+                           "speech": obs.model_dump(exclude={"words"}) if obs else None}) as span:
+        perc = perception_agent.run(req, profile.camera_enabled, speech=obs)
+        span["output"] = perception_agent.summary(perc)
+    query = f"{perc.transcript} {perception_agent.visual_summary(perc)}"
+    utterance = analysis.fused_embedding if analysis else None
+    memories = memory.search(con, req.user_id, query, k=3, utterance=utterance)
+    with agent_trace.turn(sess, "intent_agent", req.transcript,
+                          {"perception": perception_agent.summary(perc),
+                           "memories": [m.confirmed_text for m in memories]}) as span:
+        intents = intent_agent.run(perc, memories, profile.suggestion_count)
+        span["output"] = " | ".join(c.text for c in intents.candidates)
+        from .integrations import LAST_LLM
+        if LAST_LLM.get("output") is not None:
+            agent_trace.llm_span(span, LAST_LLM["model"], LAST_LLM["provider"], LAST_LLM["prompt"],
+                                 LAST_LLM["system"], LAST_LLM["output"], LAST_LLM["usage"])
+    with agent_trace.turn(sess, "learning_agent", req.transcript,
+                          {"candidates": [c.text for c in intents.candidates],
+                           "policy_version": policy.version}) as span:
+        judgment = learning_agent.judge(perc, memories, [c.text for c in intents.candidates])
+        if judgment:
+            agent_trace.tool_span(span, "typesafe.system_one",
+                                  {"question": "which candidate is meant"}, judgment)
+        ranked = learning_agent.rerank(intents, perc, memories, policy, judgment)
+        span["output"] = (f"Do you mean: {ranked[0].text}  (ranked: " +
+                          ", ".join(f"{c.text} {c.score:.2f}" for c in ranked) + ")") if ranked else ""
     latency_ms = int((time.perf_counter() - t0) * 1000)
 
     bus = [
@@ -135,6 +149,16 @@ def process(con, req: ProcessReq) -> dict:
 
 
 def feedback(con, fb: FeedbackReq, learn: bool = True, remember: bool = True) -> dict:
+    token = _ctx.set((con, fb, learn, remember))
+    try:
+        return _feedback(fb.interaction_id, fb.accepted, fb.confirmed_text, fb.none_fit)
+    finally:
+        _ctx.reset(token)
+
+
+@op(name="echoloop.feedback")
+def _feedback(interaction_id: str, accepted: bool, confirmed_text: str | None, none_fit: bool) -> dict:
+    con, fb, learn, remember = _ctx.get()
     row = memory.get_interaction(con, fb.interaction_id)
     if row is None:
         raise KeyError(fb.interaction_id)
@@ -177,25 +201,20 @@ def feedback(con, fb: FeedbackReq, learn: bool = True, remember: bool = True) ->
 
     from .schemas import Perception
     feedback_msg = ("accepted" if fb.accepted else "rejected") + (f": {confirmed}" if confirmed else " (none fit)")
-    with agent_trace.turn(row["session_id"] or fb.interaction_id, user_id, feedback_msg, "feedback") as t:
-        with agent_trace.subagent(t, "learning_agent", {"reward": reward, "shown": shown["text"],
-                                  "confirmed": confirmed},
-                                  "Reward + preference update of the per-user policy") as span:
-            span["output"] = {"policy_before": before, "policy_after": policy.as_dict(),
-                              "version": policy.version, "memory_saved": bool(confirmed)}
-        with agent_trace.subagent(t, "reflection_agent", {"prediction": shown["text"],
-                                  "confirmed": confirmed, "accepted": fb.accepted},
-                                  "Why the shown suggestion succeeded or failed") as span:
-            refl = reflection_agent.run(shown["text"], confirmed, fb.accepted, fb.none_fit,
-                                        Perception(**obs["perception"]), cands,
-                                        obs["memory_matches"]).model_dump()
-            if refl.get("reason_code") == "SYSTEM_ONE_JUDGMENT":
-                agent_trace.tool_span(t, "typesafe.system_one", {"question": "failure type"}, refl)
-            span["output"] = refl
-        if t is not None:
-            import weave
-            t.record(output_messages=[weave.Message(role="assistant",
-                                                    content=f"{refl['failure_type']}: {refl['recommendation']}")])
+    sess = agent_trace.session(row["session_id"] or fb.interaction_id, user_id)
+    with agent_trace.turn(sess, "learning_agent", feedback_msg,
+                          {"reward": reward, "shown": shown["text"], "confirmed": confirmed}) as span:
+        span["output"] = (f"reward {reward:+d}; policy v{policy.version}; weights "
+                          + ", ".join(f"{k} {before[k]}->{v}" for k, v in policy.as_dict().items() if before.get(k) != v)
+                          + ("; memory saved" if confirmed else ""))
+    with agent_trace.turn(sess, "reflection_agent", feedback_msg,
+                          {"prediction": shown["text"], "confirmed": confirmed, "accepted": fb.accepted}) as span:
+        refl = reflection_agent.run(shown["text"], confirmed, fb.accepted, fb.none_fit,
+                                    Perception(**obs["perception"]), cands,
+                                    obs["memory_matches"]).model_dump()
+        if refl.get("reason_code") == "SYSTEM_ONE_JUDGMENT":
+            agent_trace.tool_span(span, "typesafe.system_one", {"question": "failure type"}, refl)
+        span["output"] = f"{refl['failure_type']}: {refl['recommendation']}"
     agent_trace.close(row["session_id"] or fb.interaction_id)
 
     record = {"interaction_id": fb.interaction_id, "accepted": fb.accepted,

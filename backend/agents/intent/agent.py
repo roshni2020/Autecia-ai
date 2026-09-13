@@ -144,7 +144,7 @@ def _llm(p: Perception, memories: list[MemoryHit], n: int) -> list[str] | None:
     return parsed.candidates if parsed else None
 
 
-@op
+@op(name="intent_agent.run")
 def run(p: Perception, memories: list[MemoryHit], suggestion_count: int = 3) -> IntentSet:
     n = max(2, min(4, suggestion_count))
     texts = _llm(p, memories, n) or _offline(p, memories, n)

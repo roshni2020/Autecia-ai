@@ -61,24 +61,30 @@ if TRACE_CALLS and os.getenv("WANDB_API_KEY"):
     weave_init()  # must run before @op decoration, or those calls are not traced
 
 
-def op(fn: Callable) -> Callable:
-    """@weave.op if weave is live, else identity."""
-    try:
-        if TRACE_CALLS and os.getenv("WANDB_API_KEY"):
-            import weave
-            return weave.op()(fn)
-    except Exception:
-        pass
-    return fn
+def op(fn: Callable | None = None, *, name: str | None = None) -> Callable:
+    """@op / @op(name="agent.step"): weave.op when live, identity otherwise.
+
+    Names matter: four agents each exposing `run` would all show as "run"."""
+    def wrap(f: Callable) -> Callable:
+        try:
+            if TRACE_CALLS and os.getenv("WANDB_API_KEY"):
+                import weave
+                return weave.op(name=name)(f) if name else weave.op()(f)
+        except Exception:
+            pass
+        return f
+    return wrap(fn) if fn is not None else wrap
 
 
 def log_trace(name: str, payload: dict, force: bool = False) -> None:
-    """Full-interaction trace record (spec §15). Always written to JSONL too."""
+    """Interaction record -> data/traces.jsonl (always). In Weave the interaction
+    is the `echoloop.process` / `echoloop.feedback` call tree, so nothing is
+    published per request; `force=True` publishes one-off objects (eval reports)."""
     p = Path(__file__).resolve().parent.parent / "data" / "traces.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as f:
         f.write(json.dumps({"trace": name, **payload}, default=str) + "\n")
-    if (TRACE_CALLS or force) and weave_init():
+    if force and weave_init():
         try:
             import weave
             weave.publish(payload, name=name)
@@ -193,6 +199,7 @@ def llm_model() -> str:
 LAST_LLM: dict = {}   # prompt/system/output/usage of the most recent call (for agent spans)
 
 
+@op(name="wandb_inference.chat")
 def wandb_inference(prompt: str, system: str = "", max_tokens: int = 220) -> str | None:
     key = os.getenv("WANDB_API_KEY")
     if not (LLM_ON and key):
@@ -233,6 +240,7 @@ def llm_text(prompt: str, system: str = "") -> tuple[str | None, str]:
 TYPESAFE_ON = os.getenv("ECHOLOOP_TYPESAFE", "1") != "0"
 
 
+@op(name="typesafe.system_one")
 def typesafe_judge(state: dict, questions: dict):
     """One System One request. Returns the SDK response, or None when TypeSafe is
     not configured / unreachable so callers fall back to their local path."""

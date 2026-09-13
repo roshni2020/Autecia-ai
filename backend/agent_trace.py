@@ -1,128 +1,148 @@
-"""Weave agent-observability spans for the four EchoLoop agents.
+"""Weave Agents dashboard spans for the four EchoLoop agents (OpenTelemetry GenAI).
 
-Maps EchoLoop onto Weave's agent model so the Agents dashboard shows it:
-    session  -> Conversation (agent_name="echoloop")
-    request  -> Turn (user message = raw transcript / feedback)
-    agent    -> SubAgent span (perception_agent, intent_agent, learning_agent, reflection_agent)
-    W&B Inference call -> LLM span with token usage
-    TypeSafe System One -> Tool span
+Weave's Agents/Conversations views are built from OTel spans carrying the GenAI
+semantic-convention attributes. We emit them directly to the agents OTLP
+endpoint — the same wire format the Weave conversation SDK uses — because that
+is what verifiably registers agents for this project.
 
-Everything here is a no-op when Weave is not live (no key / ECHOLOOP_TRACE=0).
+    session    -> gen_ai.conversation.id shared by every span
+    agent step -> span "invoke_agent <agent>"  (perception_agent, intent_agent,
+                  learning_agent, reflection_agent) with input/output messages
+    LLM call   -> child span "chat <model>" with token usage
+    TypeSafe   -> child span "execute_tool typesafe.system_one"
+
+No-op without a W&B key or with ECHOLOOP_TRACE=0.
 """
+import base64
 import contextlib
 import json
 import os
-import time
+from functools import lru_cache
 
-_conversations: dict[str, object] = {}     # session_id -> weave Conversation
-MAX_CONVERSATIONS = 500                     # ponytail: in-memory registry; sessions are short
+ENDPOINT = "https://trace.wandb.ai/agents/otel/v1/traces"
+
+DESCRIPTIONS = {
+    "perception_agent": "Observable facts from speech + scene (transcript, pauses, objects, pointing)",
+    "intent_agent": "2-4 candidate meanings + none-fit (W&B Inference / templates)",
+    "learning_agent": "Memory retrieval, TypeSafe judgment, contextual-bandit reranking and policy update",
+    "reflection_agent": "Why the shown suggestion succeeded or failed",
+}
 
 
 def live() -> bool:
-    from .integrations import TRACE_CALLS, weave_init
-    return bool(TRACE_CALLS and os.getenv("WANDB_API_KEY") and weave_init())
+    from .integrations import TRACE_CALLS
+    return bool(TRACE_CALLS and os.getenv("WANDB_API_KEY") and os.getenv("WANDB_ENTITY")
+                and os.getenv("WANDB_PROJECT"))
 
 
-def _conversation(session_id: str, user_id: str):
-    import weave
-    conv = _conversations.get(session_id)
-    if conv is None:
-        if len(_conversations) >= MAX_CONVERSATIONS:
-            _conversations.pop(next(iter(_conversations)))
-        conv = weave.start_conversation(
-            agent_name="echoloop", conversation_id=f"{session_id}-{int(time.time() * 1000)}",
-            conversation_name=f"{user_id} · {session_id}",
-            attributes={"user_id": user_id, "app": "echoloop"})
-        _conversations[session_id] = conv
-    return conv
+@lru_cache(maxsize=1)
+def _provider():
+    """Own TracerProvider -> batch OTLP export. Deliberately not the global provider."""
+    from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+    from opentelemetry.sdk.resources import Resource
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor
+    auth = "Basic " + base64.b64encode(f"api:{os.environ['WANDB_API_KEY']}".encode()).decode()
+    project_id = f"{os.environ['WANDB_ENTITY']}/{os.environ['WANDB_PROJECT']}"   # raw; spaces are fine
+    exporter = OTLPSpanExporter(endpoint=ENDPOINT, headers={"Authorization": auth, "project_id": project_id})
+    provider = TracerProvider(resource=Resource.create({"service.name": "echoloop"}))
+    provider.add_span_processor(BatchSpanProcessor(exporter, schedule_delay_millis=2000))
+    return provider
+
+
+def _tracer():
+    return _provider().get_tracer("echoloop.agents")
+
+
+def _msgs(role: str, content) -> str:
+    text = content if isinstance(content, str) else json.dumps(content, default=str)
+    return json.dumps([{"role": role, "parts": [{"type": "text", "content": text[:6000]}]}])
+
+
+class _Session:
+    def __init__(self, session_id: str, user_id: str):
+        self.conversation_id = session_id
+        self.user_id = user_id
+
+
+def session(session_id: str, user_id: str):
+    return _Session(session_id, user_id) if live() else None
 
 
 @contextlib.contextmanager
-def turn(session_id: str, user_id: str, user_message: str, phase: str):
-    """One request = one turn. Yields the Turn (or None when tracing is off)."""
-    if not live():
-        yield None
+def turn(sess, agent: str, user_message: str, inputs: dict | None = None):
+    """One agent step. Yields a dict; set out["output"] and it becomes the output message."""
+    out: dict = {}
+    if sess is None:
+        yield out
         return
     try:
-        conv = _conversation(session_id, user_id)
-        t = conv.start_turn(user_message=user_message, agent_name="echoloop")
-        t.record(agent_description=f"EchoLoop {phase}: perception -> intent -> learning -> reflection")
+        from opentelemetry import trace as otel
+        messages = [{"role": "user", "parts": [{"type": "text", "content": user_message}]}]
+        if inputs:
+            messages.append({"role": "system", "parts": [{"type": "text",
+                             "content": json.dumps(inputs, default=str)[:6000]}]})
+        span = _tracer().start_span(f"invoke_agent {agent}", attributes={
+            "gen_ai.operation.name": "invoke_agent",
+            "gen_ai.agent.name": agent,
+            "gen_ai.agent.id": agent,
+            "gen_ai.agent.description": DESCRIPTIONS.get(agent, ""),
+            "gen_ai.conversation.id": sess.conversation_id,
+            "gen_ai.provider.name": "echoloop",
+            "user.id": sess.user_id,
+            "gen_ai.input.messages": json.dumps(messages),
+        })
+        out["turn"] = span
+        out["_ctx"] = otel.set_span_in_context(span)
     except Exception as e:
-        print(f"[agent_trace] turn not started: {e}")
-        yield None
+        print(f"[agent_trace] span {agent}: {e}")
+        yield out
         return
     try:
-        yield t
+        yield out
     finally:
         with contextlib.suppress(Exception):
-            t.end()
+            if out.get("output") is not None:
+                span.set_attribute("gen_ai.output.messages", _msgs("assistant", out["output"]))
+            span.end()
 
 
-@contextlib.contextmanager
-def subagent(t, name: str, inputs: dict | None = None, description: str = ""):
-    """A named agent span inside the turn. `yield`s a dict you can put 'output' into."""
-    out: dict = {}
-    if t is None:
-        yield out
-        return
-    import weave
-    sa = None
-    try:
-        sa = t.start_subagent(name=name)
-        sa.record(agent_description=description,
-                  input_messages=[weave.Message(role="user", content=_short(inputs))] if inputs else None)
-    except Exception as e:
-        print(f"[agent_trace] subagent {name}: {e}")
-    try:
-        yield out
-    finally:
-        if sa is not None:
-            with contextlib.suppress(Exception):
-                if out.get("output") is not None:
-                    sa.record(output_messages=[weave.Message(role="assistant", content=_short(out["output"]))])
-                sa.end()
-
-
-def llm_span(t, model: str, provider: str, prompt: str, system: str, output: str | None,
-             usage: dict | None, latency_ms: int | None = None) -> None:
-    """Record one LLM call (already completed) as an LLM span under the current turn."""
-    if t is None:
+def llm_span(parent: dict | None, model: str, provider: str, prompt: str, system: str,
+             output: str | None, usage: dict | None, latency_ms: int | None = None) -> None:
+    if not parent or "turn" not in parent:
         return
     try:
-        import weave
-        llm = weave.start_llm(model=model, provider_name=provider,
-                              system_instructions=[system] if system else None)
-        llm.record(input_messages=[weave.Message(role="user", content=prompt)],
-                   output_messages=[weave.Message(role="assistant", content=output or "")],
-                   usage=weave.Usage(input_tokens=int((usage or {}).get("prompt_tokens", 0)),
-                                     output_tokens=int((usage or {}).get("completion_tokens", 0))),
-                   response_model=model)
-        llm.end()
+        span = _tracer().start_span(f"chat {model}", context=parent["_ctx"], attributes={
+            "gen_ai.operation.name": "chat", "gen_ai.provider.name": provider,
+            "gen_ai.request.model": model, "gen_ai.response.model": model,
+            "gen_ai.usage.input_tokens": int((usage or {}).get("prompt_tokens", 0)),
+            "gen_ai.usage.output_tokens": int((usage or {}).get("completion_tokens", 0)),
+            "gen_ai.system_instructions": json.dumps([{"type": "text", "content": system}]) if system else "",
+            "gen_ai.input.messages": _msgs("user", prompt),
+            "gen_ai.output.messages": _msgs("assistant", output or ""),
+        })
+        span.end()
     except Exception as e:
         print(f"[agent_trace] llm span: {e}")
 
 
-def tool_span(t, name: str, arguments: dict, result) -> None:
-    if t is None:
+def tool_span(parent: dict | None, name: str, arguments: dict, result) -> None:
+    if not parent or "turn" not in parent:
         return
     try:
-        import weave
-        tool = weave.start_tool(name=name, arguments=_short(arguments))
-        tool.result = _short(result)
-        tool.end()
+        span = _tracer().start_span(f"execute_tool {name}", context=parent["_ctx"], attributes={
+            "gen_ai.operation.name": "execute_tool", "gen_ai.tool.name": name,
+            "gen_ai.tool.type": "function",
+            "gen_ai.tool.call.arguments": json.dumps(arguments, default=str)[:4000],
+            "gen_ai.tool.call.result": json.dumps(result, default=str)[:4000],
+        })
+        span.end()
     except Exception as e:
         print(f"[agent_trace] tool span: {e}")
 
 
 def close(session_id: str) -> None:
-    """End the session's conversation so the dashboard shows it; the next request
-    of the same session opens a fresh one under the same conversation name."""
-    conv = _conversations.pop(session_id, None)
-    if conv is not None:
+    """Flush after the feedback step so a demo interaction shows up promptly."""
+    if live():
         with contextlib.suppress(Exception):
-            conv.end()
-
-
-def _short(x, limit: int = 4000) -> str:
-    s = x if isinstance(x, str) else json.dumps(x, default=str)
-    return s if len(s) <= limit else s[:limit] + "…"
+            _provider().force_flush(5000)

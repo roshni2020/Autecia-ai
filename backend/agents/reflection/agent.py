@@ -58,7 +58,7 @@ def _classify_with_typesafe(prediction, conf, perception, candidates, memory_mat
                       confidence=round(float(a.confidence), 2))
 
 
-@op
+@op(name="reflection_agent.run")
 def run(prediction: str, confirmed_text: str | None, accepted: bool, none_fit: bool,
         perception: Perception, candidates: list[dict], memory_matches: list[dict]) -> Reflection:
     texts = [c["text"].lower() for c in candidates]

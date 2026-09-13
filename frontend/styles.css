@@ -269,3 +269,4 @@ dialog textarea{width:100%;border:1px solid var(--line);border-radius:10px;paddi
 .eval-charts figcaption{font-size:.8rem;color:var(--muted);margin-bottom:6px}
 .eval-charts svg{width:100%;height:auto;display:block}
 @media (max-width:900px){.eval-charts{grid-template-columns:1fr}}
+

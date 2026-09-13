@@ -5,6 +5,7 @@ from ...integrations import op, typesafe_judge
 from ...schemas import Candidate, IntentSet, MemoryHit, Perception
 
 
+@op(name="learning_agent.judge")
 def judge(p: Perception, memories: list[MemoryHit], texts: list[str]) -> dict | None:
     """Ask System One which candidate the person most likely means.
 
@@ -58,7 +59,7 @@ def features(c: Candidate, p: Perception, memories: list[MemoryHit],
             "speech": round(speech, 4), "judgment": round(judged, 4), "bias": 1.0}
 
 
-@op
+@op(name="learning_agent.rerank")
 def rerank(intents: IntentSet, p: Perception, memories: list[MemoryHit],
            policy: Policy, judgment: dict | None = None) -> list[Candidate]:
     for c in intents.candidates:
