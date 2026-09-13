@@ -7,7 +7,7 @@
 Built by **Roshni Kobula** (roshnikobula2020@gmail.com), **Ali Amjad** (ali.amjad52114@gmail.com) and **Rikin Shah** (rshah88@asu.edu) for the Multi-App AI Agent Hackathon (Lemma × Comma Capital, Sept 13 2026).
 
 - Repository: https://github.com/roshni2020/Autecia-ai
-- Demo video (1:23): [`docs/EchoLoop_demo.mp4`](docs/EchoLoop_demo.mp4)
+- Demo video (1:23): https://github.com/roshni2020/Autecia-ai/blob/main/docs/EchoLoop_demo.mp4
 - Technical deep-dive: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
 ---
@@ -96,4 +96,6 @@ The learning layer adds **+2.5–4.3 pts top-1** over the identical frozen syste
 
 ## 05 · Demo video
 
-[`docs/EchoLoop_demo.mp4`](docs/EchoLoop_demo.mp4) (1:23). Onboarding → fragment → wrong first guess → correction → same fragment ranks right → spoken by Echo → sent to the caregiver Slack twin → agent trace → evaluation → what's next (Lemma production monitoring, more Arga sandboxes, participatory study).
+**▶ Watch:** https://github.com/roshni2020/Autecia-ai/blob/main/docs/EchoLoop_demo.mp4 (1:23, plays inline on GitHub) · [direct download](https://github.com/roshni2020/Autecia-ai/raw/main/docs/EchoLoop_demo.mp4)
+
+Onboarding → fragment → wrong first guess → correction → same fragment ranks right → spoken by Echo → sent to the caregiver Slack twin → agent trace → evaluation → what's next (Lemma production monitoring, more Arga sandboxes, participatory study).
