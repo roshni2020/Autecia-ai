@@ -1,231 +1,99 @@
 # EchoLoop
 
-**A live multimodal communication assistant that uses four cooperating agents and explicit
-reinforcement feedback to learn how one individual expresses incomplete thoughts.**
+**A multi-agent communication assistant that learns how one person expresses incomplete thoughts — then speaks and sends what they confirm.**
 
 > You do not learn how to talk to the AI. The AI learns how you communicate.
 
-EchoLoop listens to an incomplete utterance ("I need… that… blue…"), optionally looks at what
-is visibly in the room, proposes a few complete sentences, and **only speaks what the user
-confirms**. Every confirmation or correction is a reward signal that reranks the next
-similar interaction for that person.
+Built by **Roshni Kobula** (roshnikobula2020@gmail.com), **Ali Amjad** (ali.amjad52114@gmail.com) and **Rikin Shah** (rshah88@asu.edu) for the Multi-App AI Agent Hackathon (Lemma × Comma Capital, Sept 13 2026).
 
-## What it does not do
+- Repository: https://github.com/roshni2020/Autecia-ai
+- Demo video (1:23): [`docs/EchoLoop_demo.mp4`](docs/EchoLoop_demo.mp4)
+- Technical deep-dive: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
-- No autism detection, no diagnosis, no clinical claim.
-- No emotion, mood, anxiety, or sensory-state inference — from faces or anything else.
-- Support mode is **chosen by the user in onboarding** and is a preference, never inferred.
-- Nothing is spoken aloud unless the user confirmed that exact text.
+---
 
-## Run it
+## 01 · Project overview
 
-```bash
-pip install -r requirements.txt -r requirements-speech.txt   # second file = Whisper/WavLM/GeMAPS
-cp .env.example .env          # optional keys; everything runs without them
-python -m data.generate_synthetic     # writes the 5,000-row CSV (already committed)
-uvicorn backend.main:app --reload     # open http://127.0.0.1:8000
+Many autistic and neurodivergent people, people with aphasia or speech difficulty, and AAC users know exactly what they want to say but cannot always finish or organise the sentence. *"I need… that… blue…"* — and everyone around them starts guessing. Every fragment becomes a clarification loop.
+
+EchoLoop listens to the fragment exactly as spoken, looks at what is visibly in the room (objects, pointing), remembers what this person has confirmed before, and proposes 2–4 complete sentences. The person picks one — or says none fit. Only then does EchoLoop **speak it aloud** and, if they choose, **send it to their caregiver's Slack channel**. Every confirmation or correction is a reward that changes how the next similar fragment is ranked *for that person*.
+
+**One multi-step agent, four cooperating roles, five external apps, one loop per utterance:**
+
+```
+mic / camera ─► Perception agent ─► Intent agent ─► Learning agent ─► user confirms ─► speak  (ElevenLabs)
+                Whisper, VAD,       W&B Inference    TypeSafe judge +                 ─► send   (Slack, via Arga twin)
+                GeMAPS, objects,    Qwen3-14B        per-user bandit,                 ─► reward → memory + policy
+                pointing                             memory retrieval                 ─► Reflection agent
+                                                          every step traced in W&B Weave (Agents dashboard, Evals)
 ```
 
-Checks and evaluation:
+What it deliberately is **not**: an autism detector, an emotion detector, or a clinical tool. Support mode is *chosen* by the user in onboarding, never inferred; nothing is inferred from faces; nothing is spoken or sent unless the user confirmed that exact text.
 
-```bash
-python -m tests.test_loop     # 6 assertions over the learning loop
-python -m eval.run_eval       # 5 ablations over 5,000 interactions -> W&B + report
-marimo edit notebooks/evaluation_marimo.py    # molab notebook: curves + charts
-```
+## 02 · External apps used
 
-## Two-interaction demo
-
-1. Onboard, pick a support mode, turn the camera on (or leave the scene box as
-   `blue headphones, blue notebook`).
-2. Say or type **"I need… blue…"** → three candidates. Top one is *"I need my notebook."*
-3. Press **Not quite**, correct it to **"I need my headphones."**
-   → `Reward: -1`, correction stored, memory updated, policy version bumped,
-   Reflection: `RANKING_ERROR / VISUAL_AND_MEMORY_UNDERWEIGHTED`.
-4. Say **"Can you get… blue thing…"** → *"I need my headphones."* is now ranked **#1**.
-5. Press **Yes** → `Reward: +1` → **Speak this** says the confirmed sentence.
-
-That before/after ranking flip is asserted in `tests/test_loop.py::test_correction_changes_ranking`,
-so it cannot silently rot.
-
-## The four agents
-
-Each lives in its own folder under [backend/agents/](backend/agents/) and exchanges typed
-JSON messages (`message_type / from / to / payload`), assembled in [backend/pipeline.py](backend/pipeline.py).
-
-| Agent | Folder | Does |
+| App | What the agent does with it | Where |
 | --- | --- | --- |
-| Perception | [backend/agents/perception/](backend/agents/perception/) | transcript, pauses, repetition, visible objects, pointing. Observable facts only. |
-| Intent | [backend/agents/intent/](backend/agents/intent/) | 2–4 diverse candidate sentences + a "None of these" path. |
-| Learning | [backend/agents/learning/](backend/agents/learning/) | retrieves confirmed memories, builds features, reranks, updates the policy. |
-| Reflection | [backend/agents/reflection/](backend/agents/reflection/) | labels why a turn succeeded or failed (`RANKING_ERROR`, `MISSING_CANDIDATE`, …). Recommends only — never overrides the user. |
+| **W&B Inference** (CoreWeave-hosted `OpenPipe/Qwen3-14B-Instruct`) | Intent agent generates grounded candidate sentences from the fragment, visible objects, pointing and the person's confirmed history | `backend/integrations.py` `wandb_inference` |
+| **TypeSafe AI** (System One, `jev`) | Learning agent asks *"which candidate does this person mean?"* → calibrated probability per candidate, used as a bandit feature; Reflection agent classifies why a miss happened (9 failure types) | `backend/agents/learning`, `backend/agents/reflection` |
+| **ElevenLabs** | Speaks the confirmed message (and Echo's *"Do you mean…?"*) with word timestamps that drive the 3D avatar's lip-sync | `backend/integrations.py` `tts` |
+| **Slack** — tested on an **Arga Labs** twin | *Send to caregiver*: posts the confirmed message to `#echoloop-messages` via the real Slack Web API. In development and tests the same code talks to an Arga Labs Slack twin (a seeded, isolated API twin), so no real workspace is touched | `backend/integrations_slack.py`, `eval/arga_twin.py` |
+| **W&B Weave** | Every agent step is a traced op; the four agents appear in the Weave **Agents** dashboard with LLM and TypeSafe tool spans; `weave.Evaluation` runs in the Evals tab | `backend/agent_trace.py`, `eval/weave_eval.py` |
 
-## Speech perception layer
+Also used: Ready Player Me / TalkingHead (3D avatar), TensorFlow.js COCO-SSD + MediaPipe Hands (in-browser object and pointing detection), faster-whisper, Silero VAD, openSMILE, W&B Runs.
 
-```
-MICROPHONE (browser MediaRecorder, webm/opus)
-    │
-    ▼  backend/speech/audio.py      ffmpeg (imageio-ffmpeg) → 16 kHz mono WAV, temp file, deleted after
-    ▼  backend/speech/vad.py        Silero VAD (energy fallback) → speech segments, pauses, boundaries
-    ▼  backend/speech/neurointent/  vendored NeuroIntent inference: Whisper base (+word timestamps),
-    │                               openSMILE GeMAPSv01b (62), RoBERTa-large CLS, FusionLayer [C,D,C−D,C×D]
-    │   fallbacks: whisper.py · prosody.py · text_encoder.py (own modules, same libraries)
-    ▼  backend/speech/speech_encoder.py   WavLM-base-plus (wav2vec2 fallback) pooled utterance embedding
-    ▼  backend/speech/fusion.py           text/speech/prosody/timing → one unit utterance vector
-    ▼  PERCEPTION AGENT   transcript kept raw (fillers, repeats), pause stats, fragmentation, objects, pointing
-    ▼  INTENT AGENT       sees the speech facts; proposes 2–4 meanings + "None of these"
-    ▼  LEARNING AGENT     memory + bandit; the utterance vector adds a `speech` similarity feature
-    ▼  USER  →  reward  →  memory + policy update  →  REFLECTION AGENT
+**How Arga Labs is used.** `python -m eval.arga_twin` calls Arga's MCP endpoint (`create_twin_run`) to provision a Slack twin seeded from a scenario prompt — a caregiver circle with `#echoloop-messages`, `#general`, three members and prior messages — and writes its URL and bot token into `.env`. EchoLoop's Slack code is identical for twin and production (only `SLACK_BASE_URL` differs), so the outward action is exercised end to end without side effects. `tests/test_slack_twin.py` verifies that unconfirmed text is refused (HTTP 409) and confirmed text lands in the channel.
+
+## 03 · Setup instructions
+
+```bash
+git clone https://github.com/roshni2020/Autecia-ai && cd Autecia-ai
+pip install -r requirements.txt                 # core: FastAPI, agents, bandit, UI
+pip install -r requirements-speech.txt          # optional: Whisper, VAD, GeMAPS, WavLM (~1.5 GB of models on first use)
+cp .env.example .env                            # add keys (all optional; see below)
+python -m uvicorn backend.main:app --port 8000  # open http://127.0.0.1:8000 in Chrome; allow mic + camera
 ```
 
-Observable facts only: pauses, rate, fillers, pitch/energy statistics are signal features. Nothing maps
-them to emotion, state, trait or diagnosis, and no candidate is chosen without the user confirming.
+Keys in `.env` — every one is optional; the app degrades gracefully without it:
 
-Configuration: `WHISPER_MODEL` (base → large-v3 or a fine-tuned CTranslate2 model), `SPEECH_ENCODER`,
-`TEXT_ENCODER`, `ECHOLOOP_NEUROINTENT=0` (skip the vendored path), `ECHOLOOP_SPEECH=0` (typed/browser only).
-Every stage is optional and lazy — no torch → Whisper/VAD/GeMAPS still run; no Whisper → typed input works.
+| Key | Enables | Without it |
+| --- | --- | --- |
+| `WANDB_API_KEY`, `WANDB_ENTITY`, `WANDB_PROJECT` | W&B Inference candidates, Weave tracing / Agents / Evals | template candidates, JSONL traces |
+| `TYPESAFE_API_KEY` | System One judgments | feature = 0, heuristic reflection |
+| `ELEVENLABS_API_KEY` | ElevenLabs voice + lip-sync | browser voice |
+| `SLACK_BOT_TOKEN`, `SLACK_BASE_URL` | Send to caregiver | button disabled |
+| `ARGA_API_KEY` | `python -m eval.arga_twin` provisions a Slack twin and fills the two Slack vars | use a real Slack bot token |
 
-- `POST /api/speech/analyze` — transcript, word timestamps, timing observations (embeddings stay internal).
-- `POST /interaction/process` accepts `audio` (data URL) or precomputed `speech_features`.
-- `python -m data.preprocess_audio_dataset --manifest x.csv --source NAME` — normalised records per dataset
-  (speaker-level splits, provenance and license kept; TalkBank CHAT adapter; nothing auto-downloaded).
-- `python -m eval.run_eval --audio-dataset data/speech_records.jsonl` — speech-feature ablations
-  (transcript / +GeMAPS / +WavLM / +both / +memory / +vision / +bandit).
-- Tests: `python -m tests.test_speech` (conversion, VAD, Whisper, GeMAPS size, encoder, fusion, Perception).
+Demo script (~90 s): pick a support mode → camera on with a book and a cup in view (or *Add scene context manually*) → say **"I need… blue…"** → *Not quite* → type the real meaning → say **"Can you get… blue thing…"** → the corrected meaning is now #1 → *Yes* → *Speak with voice* → *Send to caregiver*. First utterance after start takes ~25 s while speech models load; afterwards ~5 s.
 
-Third-party: `backend/speech/neurointent/` is copied unmodified from Autiz-NeuroIntent (devalshah-04),
-declared MIT — see its `NOTICE.md`. Its hiring-related intent classes and scores are not used.
+## 04 · Reliability testing
 
-## The learning loop
+**Automated (all green on the submission commit):**
 
-Features per candidate: `base, memory, visual, history, pointing, brevity, speech, judgment, bias`.
-Score is `w · features`; weights are per user, seeded by support mode, persisted in SQLite.
+| Suite | Command | Covers |
+| --- | --- | --- |
+| Learning loop | `python -m tests.test_loop` | one correction flips the ranking; accepted = +1; none-fit is never speakable; camera-off yields no visual context; bandit advantage update; Forget removes memory |
+| Speech layer | `python -m tests.test_speech` | WebM→16 kHz mono WAV with temp cleanup; VAD finds pauses; Whisper transcribes synthesized speech with word timestamps; GeMAPS = 62 features; encoder embedding finite; speech facts reach Perception unchanged; end-to-end with precomputed features |
+| Outward action | `python -m tests.test_slack_twin` | against an Arga Labs Slack twin: unconfirmed text → 409; confirmed text lands in `#echoloop-messages` |
+| Dashboard controls | `node --test tests/dashboard.test.cjs tests/dashboard-vision.test.cjs` | mic / camera / speech / session controls in a simulated browser |
 
-```
-accepted top suggestion   -> reward +1
-rejected top suggestion   -> reward -1
-user picked/edited another -> that text becomes the confirmed label (supervised preference step)
-none of these             -> no ranking update (the generator missed, not the ranker)
-```
-
-Two details that matter, both found by evaluation rather than assumed:
-
-- **Advantage baseline.** Ranking depends only on *differences* between candidates, so the
-  update uses `features − mean(candidate features)`. Updating on raw features moved every
-  candidate together and made the RL layer *worse* than a frozen policy (−17.6 pts).
-- **Generator misses are not ranker errors.** When the confirmed sentence was never generated,
-  the ranking weights are left alone.
-
-## Results (5,000-row synthetic environment, held-out test split)
+**Offline evaluation** — `python -m eval.run_eval` replays a 5,000-interaction **synthetic** environment (40 simulated users, chronological per user, no feedback leakage) through the real pipeline with 8 ablations. Held-out test split:
 
 | Configuration | Top-1 | Top-3 | Avg reward | Clarification turns |
 | --- | --- | --- | --- | --- |
-| 1. speech only | 3.2% | 3.2% | −0.94 | 1.94 |
-| 2. speech + video | 21.2% | 26.3% | −0.58 | 1.52 |
-| 3. speech + memory | 21.9% | 33.5% | −0.56 | 1.45 |
-| 4. speech + video + memory | 32.4% | 47.6% | −0.35 | 1.20 |
-| 5. + contextual-bandit reranking | **36.7%** | 47.6% | **−0.27** | **1.16** |
+| speech transcript only | 3% | 3% | −0.94 | 1.94 |
+| + vision | 21% | 26% | −0.58 | 1.52 |
+| + memory + vision | 32% | 49% | −0.36 | 1.19 |
+| **+ memory + vision + contextual bandit** | **35%** | 49% | **−0.31** | **1.16** |
 
-**Personalization gain: +4.3 points top-1** from the RL layer over the identical system with a
-frozen policy. Replay is chronological per user — no later feedback reaches an earlier
-prediction. Regenerate with `python -m eval.run_eval`.
+The learning layer adds **+2.5–4.3 pts top-1** over the identical frozen system and reduces clarification turns. Two bugs were found *by* this harness and fixed: raw-feature bandit updates made RL worse than frozen (−17.6 pts) until an advantage baseline was used; generator misses were wrongly punishing the ranker. Results are logged as a W&B run; `python -m eval.weave_eval` publishes a `weave.Evaluation` (top-1, top-3, candidate count, latency) to the Weave Evals tab.
 
-## Data
+**Observability** — every live interaction is a Weave call tree (`echoloop.process` → `perception_agent.run` → `intent_agent.run` → `wandb_inference.chat` → `learning_agent.judge` (TypeSafe) → `learning_agent.rerank`; `echoloop.feedback` → `reflection_agent.run`), and the four agents appear as separate agents in the Weave Agents dashboard with per-step input/output messages, LLM token usage and tool spans.
 
-`data/EchoLoop_5000_Synthetic_Interactions.csv` — 5,000 rows × 25 columns, 40 simulated users
-with stable personal preferences, split 3,520 / 760 / 720 chronologically per user.
+**Verified in a real browser** (headless Chrome with fake devices): record → server Whisper → candidates → confirm → send; 3D avatar loads; in-browser object detection runs. The demo video was captured from this flow.
 
-> This is a **synthetic interaction environment used to bootstrap and evaluate the adaptive
-> ranking loop**. It is staged engineering data. It is not real user data, not autistic-user
-> data, and not clinical data.
+**Honest limits.** The evaluation data is synthetic (staged engineering data — not real users, not clinical). Per-row accuracy against exact-match ground truth is low by design; the claim is *personalisation gain*, not absolute accuracy. Slack is tested on a twin, not a production workspace. Whisper `base` on CPU adds ~2 s per utterance.
 
-Generated by [data/generate_synthetic.py](data/generate_synthetic.py) — drop in your own CSV at
-the same path with the same columns and everything reads it instead.
+## 05 · Demo video
 
-Other sources are kept **separate by purpose**, never joined into one fake multimodal corpus:
-
-| Source | Purpose | Status |
-| --- | --- | --- |
-| AAC-like corpus (aactext.org/imagine) | phrase bank / candidate language | paste sentences into `data/phrasebank.txt` |
-| COMM2 (aactext.org/comm2) | external text evaluation | same loader |
-| YouRefIt | pointing + referent grounding benchmark | not wired; perception eval only |
-| ASDBank AAC, HeyJay!, SEP-28k | research grounding, atypical speech, disfluency stress | controlled access; demo does not depend on them |
-
-## Integrations
-
-Everything degrades to a working offline path, so the demo never depends on a network call.
-
-| Service | Used for | Without a key |
-| --- | --- | --- |
-| **W&B Weave** | traces every agent call, interaction, reward, reflection | JSONL at `data/traces.jsonl` |
-| **W&B runs** | one run per evaluation: ablation table + headline metrics | report JSON only |
-| **W&B Inference** (CoreWeave-hosted) | the Intent agent's LLM: grounded, personal candidate sentences (`WANDB_INFERENCE_MODEL`, default Qwen3-14B-Instruct) | template generator |
-| **ElevenLabs** | speaking confirmed text | browser `speechSynthesis` |
-| **Gemini** | frame → visible objects + pointing (observable facts only) | scene box in the UI |
-| **TypeSafe AI** (System One, `jev`) | per-candidate "which one is meant?" probability → a bandit feature; failure-type classifier in Reflection | feature is 0; heuristic reflection |
-| **CoreWeave** | serves the Intent LLM through W&B Inference; every live interaction is a measured CoreWeave workload | template generator, local CPU |
-
-Keys go in `.env` (git-ignored). Batch jobs set `ECHOLOOP_TRACE=0` — a span per agent call turns
-a 5,000-row replay into an hours-long job.
-
-W&B MCP server, if you want the dashboards inside Claude Code:
-
-```bash
-claude mcp add --transport http wandb https://mcp.withwandb.com/mcp \
-  --header "Authorization: Bearer $WANDB_API_KEY"
-```
-
-## TypeSafe System One
-
-Two judgments per interaction, both via `client.system_one()` ([backend/integrations.py](backend/integrations.py) `typesafe_judge`):
-
-- **Learning agent** — a `Choice` over the candidate sentences (+ "none of these") given the utterance,
-  visible objects, pointing target and this person's confirmed history. The returned probability becomes
-  the `judgment` feature. It is evidence, not the decision: the per-user bandit learns how much to trust it
-  next to memory and vision, so explicit user feedback still wins.
-- **Reflection agent** — a `Choice` over the nine failure types with plain-language criteria, replacing the
-  rule-based classifier whenever TypeSafe is reachable.
-
-Batch replays run with `ECHOLOOP_TYPESAFE=0` so an evaluation is not 25,000 network calls.
-
-## Voice and camera
-
-- **Input**: browser speech recognition, continuous, with pause tolerance from the support mode
-  (long = 6s of silence before it assumes you are finished). The transcript is passed through
-  **unedited** — fillers, repeats and fragments are the signal, not noise to clean up.
-- **Output**: ElevenLabs or the browser voice, confirmed text only, with a **Stop** button.
-- **Camera**: off by default, one click to disable. Detection runs **in the browser**:
-  TensorFlow.js COCO-SSD boxes objects (the `person` class is discarded — never drawn, never sent) and
-  MediaPipe Hands turns an extended index finger into a ray; the object it hits is the pointing target.
-  Detected labels and the pointing target go to the Perception agent as scene context. Frames stay
-  on-device unless a server vision key (`GEMINI_API_KEY`) is configured. Nothing is stored.
-  COCO-SSD knows 80 everyday classes (book, cup, bottle, cell phone, laptop, remote, scissors, …) —
-  not "headphones", so demo with a book and a cup.
-
-## User control
-
-"None of these", free-text edit, camera off, stop speaking, and **Forget this memory** on every
-stored item (Learning History tab). Raw audio and video are never persisted — only derived
-context, embeddings, confirmed sentences and reward data.
-
-## Layout
-
-```
-backend/     agents/{perception,intent,learning,reflection}/  pipeline.py  bandit.py
-             memory.py  embed.py  integrations.py  schemas.py  main.py
-frontend/    index.html            # one file: onboarding, live, history, trace, evaluation
-data/        generate_synthetic.py  EchoLoop_5000_Synthetic_Interactions.csv  phrasebank.txt
-eval/        run_eval.py           # ablations, curves, W&B run
-notebooks/   evaluation_marimo.py  # molab
-tests/       test_loop.py
-```
-
-## Deliberate shortcuts
-
-Marked in code with `ponytail:` comments.
-
-- Hashed bag-of-ngrams embeddings instead of a sentence transformer — offline, deterministic,
-  no model download. Swap in a real embedder if retrieval quality becomes the bottleneck.
-- NumPy cosine over one user's rows instead of a vector service. Move to Chroma/pgvector past
-  ~10k memories per user.
-- One static HTML page instead of a React/Vite build — no npm, no build step, same UI.
+[`docs/EchoLoop_demo.mp4`](docs/EchoLoop_demo.mp4) (1:23). Onboarding → fragment → wrong first guess → correction → same fragment ranks right → spoken by Echo → sent to the caregiver Slack twin → agent trace → evaluation → what's next (Lemma production monitoring, more Arga sandboxes, participatory study).
