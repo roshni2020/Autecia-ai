@@ -5,6 +5,8 @@ const userPath = encodeURIComponent(user);
 let profile = null, session = null, last = null, chosen = 0, camera = null, recognition = null;
 let busy = false, feedbackDone = false, confirmed = null, playback = null, speechVersion = 0, epoch = 0;
 let cameraGeneration = 0, liveContext = {objects:[],pointing:null};
+let serverASR = false, mediaRec = null, micStream = null, audioDataUrl = null;
+let micGeneration = 0, micPending = false, recordingTimer = null;
 let stats = { turns: 0, accepted: 0, feedback: 0, corrected: 0 };
 const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 async function api(path, body) {
@@ -14,14 +16,14 @@ async function api(path, body) {
   return result;
 }
 function notice(text) { $('notice').textContent = text; $('notice').hidden = !text; }
-function controls() { for (const id of ['yes','edit','no']) $(id).disabled = busy || !last || feedbackDone; $('suggest').disabled = busy; $('mic').disabled = busy; }
+function controls() { for (const id of ['yes','edit','no']) $(id).disabled = busy || !last || feedbackDone; $('suggest').disabled = busy || micPending || !!mediaRec; $('mic').disabled = busy || micPending; }
 function insights() { $('turns').textContent = stats.turns; $('corrections').textContent = stats.corrected; $('rate').textContent = stats.feedback ? Math.round(stats.accepted / stats.feedback * 100) + '%' : '—'; $('rateNote').textContent = stats.feedback ? `${stats.accepted} of ${stats.feedback} feedback responses` : 'Waiting for feedback'; }
 async function loadMemory() {
   const history = await api('/api/history/' + userPath);
   $('memoryList').innerHTML = history.memories.slice(0,4).map(m => `<div class="memory-item"><span aria-hidden="true">${m.success_count ? '✓' : '▤'}</span><div><strong>${esc(m.confirmed_text)}</strong><small>${m.success_count + m.failure_count} confirmation${m.success_count + m.failure_count === 1 ? '' : 's'} · from “${esc(m.fragment)}”</small></div></div>`).join('') || '<p class="muted">Your confirmed words will appear here. Start a conversation to create your first memory.</p>';
 }
 function stopSpeaking() { speechVersion++; window.speechSynthesis?.cancel(); if (playback) { playback.pause(); playback = null; } }
-function stopMic() { if (recognition) { recognition.onend = null; recognition.abort(); recognition = null; } $('mic').textContent = '🎙 Start listening'; $('mic').setAttribute('aria-pressed','false'); $('listening').textContent = 'Take your time. Pauses are welcome.'; }
+function stopMic() { cancelRecording(); if (recognition) { recognition.onend = null; recognition.abort(); recognition = null; } $('mic').textContent = '🎙 Start listening'; $('mic').setAttribute('aria-pressed','false'); $('listening').textContent = 'Take your time. Pauses are welcome.'; }
 function stopCamera() { cameraGeneration++; window.DashboardVision.stop(); liveContext = {objects:[],pointing:null}; $('objects').innerHTML = '<span>Camera off</span>'; $('visionStatus').textContent = 'Camera off. Detection starts when you enable it.'; $('retryVision').hidden = true; camera?.getTracks().forEach(t => t.stop()); camera = null; $('video').srcObject = null; $('cameraEmpty').hidden = false; $('cameraBadge').textContent = 'Off'; $('cameraBadge').className = 'pill neutral'; $('cameraToggle').textContent = 'Camera off'; $('cameraToggle').setAttribute('aria-label','Turn camera on'); }
 async function toggleCamera() {
   if (camera) { stopCamera(); return; }
@@ -53,30 +55,52 @@ function startDetection() {
 $('retryVision').onclick=startDetection;
 $('cameraStart').onclick = toggleCamera; $('cameraToggle').onclick = toggleCamera;
 $('disableDevices').onclick = () => { stopCamera(); stopMic(); notice('Camera and microphone are off.'); };
-let serverASR = false, mediaRec = null, micStream = null, audioDataUrl = null;
-fetch('/api/status').then(r => r.json()).then(st => { serverASR = !!(st.speech && st.speech.enabled && st.speech.whisper && st.speech.ffmpeg); if (serverASR) $('mic').title = 'Server speech recognition (Whisper ' + st.speech.whisper_model + ')'; }).catch(() => {});
-function stopRecording() { if (mediaRec && mediaRec.state === 'recording') mediaRec.stop(); }
-async function startRecording() {
-  micStream = await navigator.mediaDevices.getUserMedia({audio:true});
-  const mime = MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? 'audio/webm;codecs=opus' : 'audio/webm';
-  mediaRec = new MediaRecorder(micStream, {mimeType:mime}); const chunks = [];
-  mediaRec.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
-  mediaRec.onstop = async () => {
-    micStream?.getTracks().forEach(t => t.stop()); micStream = null;
-    const blob = new Blob(chunks, {type:'audio/webm'});
-    audioDataUrl = await new Promise(ok => { const fr = new FileReader(); fr.onload = () => ok(fr.result); fr.readAsDataURL(blob); });
-    $('mic').textContent = '🎙 Start listening'; $('mic').setAttribute('aria-pressed','false');
-    $('listening').textContent = 'Transcribing on the server…';
-    mediaRec = null;
-    $('suggest').click();
-  };
-  mediaRec.start(250);
-  $('mic').textContent = '⏹ Stop & suggest'; $('mic').setAttribute('aria-pressed','true');
-  $('listening').textContent = 'Recording… press again when you are done. Pauses are welcome.';
-  setTimeout(stopRecording, 45000);
+fetch('/api/status').then(r => r.json()).then(st => { serverASR = !!(st.speech && st.speech.enabled && st.speech.whisper && st.speech.ffmpeg && window.MediaRecorder); }).catch(() => {});
+function cancelRecording() {
+  micGeneration++; clearTimeout(recordingTimer); recordingTimer = null;
+  const recorder = mediaRec; mediaRec = null; micPending = false; audioDataUrl = null;
+  if (recorder) { recorder.onstop = null; recorder.ondataavailable = null; if (recorder.state !== 'inactive') recorder.stop(); }
+  micStream?.getTracks().forEach(t => t.stop()); micStream = null; controls();
 }
-$('micOff').onclick = () => { stopRecording(); stopMic(); micStream?.getTracks().forEach(t => t.stop()); micStream = null; audioDataUrl = null; $('listening').textContent = 'Microphone is off.'; notice('Microphone is off. Nothing is being recorded.'); };
+function stopRecording() { if (mediaRec && mediaRec.state === 'recording') { clearTimeout(recordingTimer); micPending = true; controls(); mediaRec.stop(); } }
+async function startRecording() {
+  const generation = ++micGeneration; micPending = true; controls();
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({audio:true});
+    if (generation !== micGeneration) { stream.getTracks().forEach(t => t.stop()); return; }
+    micStream = stream;
+    const mime = ['audio/webm;codecs=opus','audio/webm','audio/mp4'].find(type => MediaRecorder.isTypeSupported(type));
+    const recorder = new MediaRecorder(stream, mime ? {mimeType:mime} : {}), chunks = [];
+    mediaRec = recorder;
+    recorder.ondataavailable = e => { if (e.data.size) chunks.push(e.data); };
+    recorder.onerror = () => { if (generation === micGeneration) { stopMic(); notice('Recording failed. Please try again or type your message.'); } };
+    recorder.onstop = async () => {
+      stream.getTracks().forEach(t => t.stop());
+      if (generation !== micGeneration) return;
+      micStream = null;
+      try {
+        const blob = new Blob(chunks, {type:recorder.mimeType || mime || 'audio/webm'});
+        const audio = await new Promise((resolve,reject) => { const reader = new FileReader(); reader.onload = () => resolve(reader.result); reader.onerror = () => reject(new Error('Could not read the recording. Please try again.')); reader.readAsDataURL(blob); });
+        if (generation !== micGeneration) return;
+        mediaRec = null; micPending = false; audioDataUrl = audio; controls();
+        $('mic').textContent = 'Start listening'; $('mic').setAttribute('aria-pressed','false');
+        $('listening').textContent = 'Transcribing on the server...';
+        $('suggest').click();
+      } catch(e) { if (generation === micGeneration) { stopMic(); notice(e.message); } }
+    };
+    recorder.start(250); micPending = false; controls();
+    $('mic').textContent = 'Stop & suggest'; $('mic').setAttribute('aria-pressed','true');
+    $('listening').textContent = 'Recording... press again when you are done. Pauses are welcome.';
+    recordingTimer = setTimeout(() => { if (generation === micGeneration) stopRecording(); }, 45000);
+  } catch(e) {
+    stream?.getTracks().forEach(t => t.stop());
+    if (generation === micGeneration) { stopMic(); notice('Microphone is unavailable. You can type your message in the transcript box.'); }
+  }
+}
+$('micOff').onclick = () => { stopMic(); $('listening').textContent = 'Microphone is off.'; notice('Microphone is off. Nothing is being recorded.'); };
 $('mic').onclick = () => {
+  if (busy || micPending) return;
   if (serverASR) {
     if (mediaRec) { stopRecording(); return; }
     stopSpeaking();
@@ -120,7 +144,7 @@ $('suggest').onclick = async () => {
     if (!camera) $('objects').innerHTML = result.perception.objects.map(o => `<span>${esc(o.label)}</span>`).join('') || '<span>No visual objects in this interaction</span>';
     for (const [id,prefix] of [['perception','Perception'],['intent','Intent'],['learning','Learning']]) $(id).textContent = result.trace_summary.find(s => s.startsWith(prefix))?.replace(/^[^:]+:\s*/,'') || 'Complete';
     $('reflection').textContent = 'Ready for your feedback'; $('activityBadge').textContent = 'Awaiting feedback';
-  } catch(e) { notice(e.message || 'Could not reach EchoLoop.'); $('candidates').innerHTML = '<p class="muted">Your words are still in the transcript. Press Suggest to try again.</p>'; $('activityBadge').textContent = 'Try again'; }
+  } catch(e) { if (turn !== epoch) return; audioDataUrl = audio; notice(e.message || 'Could not reach EchoLoop.'); $('candidates').innerHTML = '<p class="muted">Your words are still in the transcript. Press Suggest to try again.</p>'; $('activityBadge').textContent = 'Try again'; }
   finally { busy = false; controls(); }
 };
 $('transcript').addEventListener('keydown',e => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) { e.preventDefault(); $('suggest').click(); } });
@@ -137,7 +161,7 @@ async function feedback(body) {
     $('speech').hidden = !confirmed; $('confirmed').textContent = confirmed ? confirmed.text : '';
     notice(confirmed ? 'Message confirmed. Speak it when you are ready.' : 'Feedback saved. No message will be spoken.');
     loadMemory().catch(() => notice('Feedback saved. Memory list could not refresh.'));
-  } catch(e) { notice(e.message); renderChoices(); }
+  } catch(e) { if (turn === epoch) { notice(e.message); renderChoices(); } }
   finally { busy = false; controls(); }
 }
 $('yes').onclick = () => { if (last) feedback({accepted:chosen === 0,confirmed_text:last.candidate_detail[chosen].text,chosen_candidate_id:last.candidate_detail[chosen].id}); };
@@ -156,7 +180,7 @@ $('speak').onclick = async () => {
   } catch(e) { notice(e.message); } finally { $('speak').disabled = false; }
 };
 $('stop').onclick = stopSpeaking;
-$('end').onclick = () => { epoch++; stopCamera(); stopMic(); stopSpeaking(); last = null; confirmed = null; session = null; feedbackDone = true; $('speech').hidden = true; $('candidates').innerHTML = '<p class="muted">Session ended. Type a new thought to start another.</p>'; $('transcript').value = ''; $('activityBadge').textContent = 'Session ended'; stats = {turns:0,accepted:0,feedback:0,corrected:0}; insights(); controls(); notice('Session ended. Camera, microphone, and speech are off.'); };
+$('end').onclick = () => { epoch++; stopCamera(); stopMic(); stopSpeaking(); $('editDialog').close(); last = null; confirmed = null; session = null; feedbackDone = true; $('speech').hidden = true; $('candidates').innerHTML = '<p class="muted">Session ended. Type a new thought to start another.</p>'; $('transcript').value = ''; $('activityBadge').textContent = 'Session ended'; stats = {turns:0,accepted:0,feedback:0,corrected:0}; insights(); controls(); notice('Session ended. Camera, microphone, and speech are off.'); };
 for (const [id,cls,key] of [['large','large','echoloop_large-text'],['contrast','contrast','echoloop_high-contrast']]) { const input=$(id); input.checked=localStorage.getItem(key)==='1'; document.body.classList.toggle(cls,input.checked); input.onchange=() => { document.body.classList.toggle(cls,input.checked); localStorage.setItem(key,input.checked?'1':'0'); }; }
 $('name').textContent = user; $('initial').textContent = user.slice(0,2).toUpperCase();
 (async () => { try { profile=(await api('/api/profile/' + userPath)).profile; await loadMemory(); $('connection').textContent='Connected · Ready to learn'; $('connection').classList.add('online'); } catch { $('connection').textContent='Offline'; notice('Could not connect to the backend. Start EchoLoop and refresh this page.'); } })();

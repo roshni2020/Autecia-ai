@@ -10,3 +10,5 @@
 .mic-big{font-size:1.15rem;padding:14px 22px;border-radius:999px;min-width:220px}
 .mic-big[aria-pressed="true"]{background:linear-gradient(#ff6b6b,#d64545);border-color:#d64545;animation:mic-pulse 1.4s ease-out infinite}
 @keyframes mic-pulse{0%{box-shadow:0 0 0 0 rgba(214,69,69,.45)}100%{box-shadow:0 0 0 16px rgba(214,69,69,0)}}
+@media(prefers-reduced-motion:reduce){.mic-big[aria-pressed="true"]{animation:none}}
+@media(max-width:850px){nav a>span:last-child{display:block;position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}}
