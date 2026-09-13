@@ -1,1 +1,5 @@
-{"env": {"ECHOLOOP_SPEECH": "0", "ECHOLOOP_TRACE": "1"}}
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "functions": { "main.py": { "maxDuration": 60 } },
+  "env": { "ECHOLOOP_SPEECH": "0", "ECHOLOOP_TRACE": "1" }
+}
