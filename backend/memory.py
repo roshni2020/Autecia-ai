@@ -5,6 +5,7 @@ Users have tens-to-hundreds of memories; a service is not worth it.
 Move to Chroma/pgvector when a single user exceeds ~10k memories.
 """
 import json
+import os
 import sqlite3
 import time
 from pathlib import Path
@@ -15,7 +16,11 @@ from .embed import DIM, cosine, embed
 from .speech.fusion import cosine as speech_cosine
 from .schemas import MemoryHit, SupportProfile
 
-DB_PATH = Path(__file__).resolve().parent.parent / "data" / "echoloop.db"
+# ponytail: serverless hosts (Vercel) have a read-only bundle and only /tmp is writable;
+# memory there survives only while the instance is warm. Use a real host for persistence.
+DB_PATH = (Path(os.environ["ECHOLOOP_DATA_DIR"]) / "echoloop.db" if os.getenv("ECHOLOOP_DATA_DIR")
+           else Path("/tmp/echoloop/echoloop.db") if os.getenv("VERCEL")
+           else Path(__file__).resolve().parent.parent / "data" / "echoloop.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS profiles (

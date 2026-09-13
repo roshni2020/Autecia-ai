@@ -11,14 +11,4 @@ weave
 marimo
 matplotlib
 pandas
-# speech subsystem (backend/speech). All optional at runtime: each stage degrades.
-torch
-torchaudio
-faster-whisper
-transformers
-sentencepiece
-opensmile
-imageio-ffmpeg
-silero-vad
-soundfile
-librosa
+# Speech subsystem (Whisper/WavLM/GeMAPS): pip install -r requirements-speech.txt

@@ -80,7 +80,7 @@ def log_trace(name: str, payload: dict, force: bool = False) -> None:
     """Interaction record -> data/traces.jsonl (always). In Weave the interaction
     is the `echoloop.process` / `echoloop.feedback` call tree, so nothing is
     published per request; `force=True` publishes one-off objects (eval reports)."""
-    p = Path(__file__).resolve().parent.parent / "data" / "traces.jsonl"
+    p = (Path("/tmp/echoloop") if os.getenv("VERCEL") else Path(__file__).resolve().parent.parent / "data") / "traces.jsonl"
     p.parent.mkdir(parents=True, exist_ok=True)
     with p.open("a", encoding="utf-8") as f:
         f.write(json.dumps({"trace": name, **payload}, default=str) + "\n")

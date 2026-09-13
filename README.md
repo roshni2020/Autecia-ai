@@ -20,7 +20,7 @@ similar interaction for that person.
 ## Run it
 
 ```bash
-pip install -r requirements.txt
+pip install -r requirements.txt -r requirements-speech.txt   # second file = Whisper/WavLM/GeMAPS
 cp .env.example .env          # optional keys; everything runs without them
 python -m data.generate_synthetic     # writes the 5,000-row CSV (already committed)
 uvicorn backend.main:app --reload     # open http://127.0.0.1:8000
