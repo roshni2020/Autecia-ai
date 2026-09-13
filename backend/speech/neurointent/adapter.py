@@ -23,6 +23,11 @@ ENABLED = os.getenv("ECHOLOOP_NEUROINTENT", "1") != "0"
 def load_models() -> dict | None:
     if not ENABLED:
         return None
+    try:  # torch + CTranslate2 both spawn OpenMP pools; capped they stop fighting for cores
+        import torch
+        torch.set_num_threads(int(os.getenv("ECHOLOOP_TORCH_THREADS", "4")))
+    except Exception:
+        pass
     try:
         return ni._load_models()                      # their loader, checkpoint included
     except FileNotFoundError as e:
@@ -80,7 +85,7 @@ def analyze(wav_path: Path, transcript_override: str | None = None) -> dict | No
     # 2. Whisper (their call + word timestamps + disfluency prompt: wording is kept raw)
     if transcript_override is None:
         segments, info = m["whisper"].transcribe(
-            str(wav_path), beam_size=3, word_timestamps=True, condition_on_previous_text=False,
+            str(wav_path), beam_size=int(os.getenv("WHISPER_BEAM", "1")), word_timestamps=True, condition_on_previous_text=False,
             initial_prompt="Um, uh... I, I need... that, um, the... you know... hmm.")
         words, segs, texts = [], [], []
         for s in segments:

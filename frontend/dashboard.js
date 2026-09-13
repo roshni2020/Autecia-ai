@@ -131,7 +131,8 @@ $('suggest').onclick = async () => {
   $('candidates').innerHTML = '<p class="muted" role="status">Finding possible meanings…</p>'; $('activityBadge').textContent = 'Working';
   try {
     if (!profile) profile = (await api('/api/profile/' + userPath)).profile;
-    if (!session) session = (await api('/interaction/start',{user_id:user})).session_id;
+    if (turn !== epoch) return;
+    if (!session) { const started = await api('/interaction/start',{user_id:user}); if (turn !== epoch) return; session = started.session_id; }
     const objects = [...new Set([...liveContext.objects, ...$('scene').value.split(',').map(s => s.trim()).filter(Boolean)])];
     const updatedProfile = {...profile,camera_enabled:!!camera || !!objects.length};
     await api('/api/profile/' + userPath, updatedProfile); profile = updatedProfile;

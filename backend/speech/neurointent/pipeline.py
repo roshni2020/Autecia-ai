@@ -160,7 +160,8 @@ def _load_models() -> dict:
     )
 
     print("[pipeline] Loading Whisper base...")
-    whisper = WhisperModel("base", device=device, compute_type=whisper_compute)
+    whisper = WhisperModel(os.getenv("WHISPER_MODEL", "base"), device=device, compute_type=whisper_compute,
+                           cpu_threads=int(os.getenv("WHISPER_THREADS", "4")))  # EchoLoop: configurable
 
     print("[pipeline] Loading RoBERTa-large...")
     tokenizer = RobertaTokenizer.from_pretrained("roberta-large")

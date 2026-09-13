@@ -14,6 +14,7 @@ import numpy as np
 os.environ.setdefault("ECHOLOOP_TRACE", "0")
 os.environ.setdefault("ECHOLOOP_TYPESAFE", "0")
 os.environ.setdefault("ECHOLOOP_LLM", "0")
+os.environ.setdefault("ECHOLOOP_SPEECH_ENCODER", "1")
 
 from backend import memory, pipeline  # noqa: E402
 from backend.agents import perception  # noqa: E402

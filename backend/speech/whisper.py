@@ -40,7 +40,7 @@ def transcribe(wav_path: Path, language: str | None = None) -> Transcription | N
     try:
         segments, info = model.transcribe(
             str(wav_path), language=language or os.getenv("WHISPER_LANGUAGE") or None,
-            beam_size=3, word_timestamps=True, condition_on_previous_text=False,
+            beam_size=int(os.getenv("WHISPER_BEAM", "1")), word_timestamps=True, condition_on_previous_text=False,
             initial_prompt=DISFLUENT_PROMPT, vad_filter=False)
         words, segs, texts = [], [], []
         for s in segments:

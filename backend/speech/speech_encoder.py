@@ -19,6 +19,8 @@ FALLBACK_MODEL = "facebook/wav2vec2-base"       # 768-d
 
 @lru_cache(maxsize=1)
 def _model():
+    if os.getenv("ECHOLOOP_SPEECH_ENCODER", "0") == "0":   # off by default: ~1.5 s/utterance on CPU
+        return None
     name = os.getenv("SPEECH_ENCODER", DEFAULT_MODEL)
     for candidate in (name, FALLBACK_MODEL):
         try:

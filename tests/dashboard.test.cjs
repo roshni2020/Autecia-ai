@@ -5,7 +5,7 @@ class Element {
  constructor(){this.hidden=false;this.disabled=false;this.value='';this.checked=false;this.textContent='';this.attrs={};this.events={};this.children=[];this.classList={toggle(){},add(){},remove(){}};}
  setAttribute(k,v){this.attrs[k]=String(v);} addEventListener(k,v){this.events[k]=v;} focus(){} showModal(){this.open=true;} close(){this.open=false;}
  set innerHTML(value){this.html=value;this.children=[...value.matchAll(/data-choice="(\d+)"/g)].map(m=>{const e=new Element();e.dataset={choice:m[1]};return e;});} get innerHTML(){return this.html||'';}
- querySelectorAll(){return this.children;}
+ click(){if(!this.disabled)return this.onclick?.();} querySelectorAll(){return this.children;}
 }
 const ids=[...html.matchAll(/\bid="([^"]+)"/g)].map(m=>m[1]);assert.equal(ids.length,new Set(ids).size);
 const elements=Object.fromEntries(ids.map(id=>[id,new Element()]));
@@ -14,8 +14,9 @@ let resolveSpeech=null;
 const profile={camera_enabled:false,pause_tolerance:'medium',support_mode:'other',suggestion_count:3};
 const result={interaction_id:'i1',candidate_detail:[{id:'a',text:'I need my book.'},{id:'b',text:'I need my cup.'}],perception:{objects:[{label:'book'}]},trace_summary:['Perception: book detected','Intent: 2 meanings','Learning: memory checked']};
 const document={getElementById:id=>{assert.ok(elements[id],id);return elements[id];},body:new Element(),createElement:()=>({width:0,height:0,getContext:()=>({drawImage(){}}),toDataURL:()=> 'data:image/jpeg;base64,test'})};
-const context={document,localStorage:{getItem:()=>null,setItem(){}},console,Number,String,Set,Error,Promise,window:null,navigator:{mediaDevices:{getUserMedia:async()=>{if(mediaResolve)return new Promise(r=>mediaResolve=r);const t={stopped:false,stop(){this.stopped=true;},addEventListener(){}};tracks.push(t);return{getTracks:()=>[t],getVideoTracks:()=>[t]};}}},speechSynthesis:{cancel(){voices.length=0;},speak(u){voices.push(u);}},SpeechSynthesisUtterance:function(text){this.text=text;},Audio:function(){this.play=async()=>{};this.pause=()=>{};},addEventListener(){},DashboardVision:{stop(){visionStops++;},start(v,update){visionUpdate=update;}},fetch:async(path,options)=>{const body=options?.body?JSON.parse(options.body):undefined;calls.push({path,body});let data;
- if(path.startsWith('/api/profile'))data={profile};
+const context={document,setTimeout,clearTimeout,localStorage:{getItem:()=>null,setItem(){}},console,Number,String,Set,Error,Promise,window:null,navigator:{mediaDevices:{getUserMedia:async()=>{if(mediaResolve)return new Promise(r=>mediaResolve=r);const t={stopped:false,stop(){this.stopped=true;},addEventListener(){}};tracks.push(t);return{getTracks:()=>[t],getVideoTracks:()=>[t]};}}},speechSynthesis:{cancel(){voices.length=0;},speak(u){voices.push(u);}},SpeechSynthesisUtterance:function(text){this.text=text;},Audio:function(){this.play=async()=>{};this.pause=()=>{};},addEventListener(){},DashboardVision:{stop(){visionStops++;},start(v,update){visionUpdate=update;}},fetch:async(path,options)=>{const body=options?.body?JSON.parse(options.body):undefined;calls.push({path,body});let data;
+ if(path==='/api/status')data={speech:{enabled:false}};
+ else if(path.startsWith('/api/profile'))data={profile};
  else if(path.startsWith('/api/history'))data={memories:[{confirmed_text:'<img src=x>',fragment:'book',success_count:1,failure_count:0}]};
  else if(path==='/interaction/start')data={session_id:'session1'};
  else if(path==='/interaction/process'){if(failProcess) return{ok:false,json:async()=>({detail:'Test failure'})};data=result;}
@@ -40,6 +41,24 @@ const settle=()=>new Promise(r=>setImmediate(r));
  mediaResolve=true;const starting=elements.cameraStart.onclick();await settle();elements.disableDevices.onclick();const lateTrack={stopped:false,stop(){this.stopped=true;}};mediaResolve({getTracks:()=>[lateTrack],getVideoTracks:()=>[lateTrack]});await starting;assert.equal(lateTrack.stopped,true);mediaResolve=null;console.log('PASS pending camera permission cancelled by devices-off');
  let rec;context.SpeechRecognition=function(){rec=this;this.start=()=>{};this.abort=()=>{this.aborted=true;};};elements.mic.onclick();rec.onresult({results:[[{transcript:'I need the book'}]]});assert.equal(elements.transcript.value,'I need the book');elements.mic.onclick();assert.equal(rec.aborted,true);console.log('PASS microphone transcript and stop');
  elements.end.onclick();assert.equal(elements.turns.textContent,0);assert.equal(elements.speech.hidden,true);assert.match(elements.activityBadge.textContent,/ended/);console.log('PASS end session reset');
+ 
+ context.Blob=Blob;context.FileReader=function(){this.readAsDataURL=()=>{this.result='data:audio/webm;base64,test';this.onload();};};
+ const recorders=[];context.MediaRecorder=class {static isTypeSupported(){return true;}constructor(stream,options){this.stream=stream;this.mimeType=options.mimeType;this.state='inactive';recorders.push(this);}start(){this.state='recording';}stop(){this.state='inactive';const done=this.onstop;this.ondataavailable?.({data:new Blob(['audio'])});setImmediate(()=>done?.());}};
+ vm.runInContext('serverASR=true',context);
+ const processCount=()=>calls.filter(c=>c.path==='/interaction/process').length;
+ for(const stop of ['micOff','disableDevices','end']){
+   elements.mic.onclick();await settle();assert.equal(recorders.at(-1).state,'recording');assert.equal(elements.suggest.disabled,true);
+   const count=processCount();elements[stop].onclick();await settle();assert.equal(recorders.at(-1).state,'inactive');assert.equal(processCount(),count);assert.ok(tracks.every(t=>t.stopped));
+ }
+ mediaResolve=true;elements.mic.onclick();await settle();elements.end.onclick();const pendingTrack={stopped:false,stop(){this.stopped=true;}};mediaResolve({getTracks:()=>[pendingTrack]});await settle();assert.equal(pendingTrack.stopped,true);mediaResolve=null;
+ elements.transcript.value='';elements.mic.onclick();await settle();elements.mic.onclick();await settle();await settle();assert.equal(calls.findLast(c=>c.path==='/interaction/process').body.audio,'data:audio/webm;base64,test');assert.equal(elements.mic.attrs['aria-pressed'],'false');assert.ok(tracks.every(t=>t.stopped));
+ elements.end.onclick();
+ elements.mic.onclick();await settle();const cancelledCount=processCount();elements.mic.onclick();elements.micOff.onclick();await settle();await settle();assert.equal(processCount(),cancelledCount);
+ failProcess=true;elements.transcript.value='';elements.mic.onclick();await settle();elements.mic.onclick();await settle();await settle();assert.equal(elements.suggest.disabled,false);failProcess=false;await elements.suggest.onclick();assert.equal(calls.findLast(c=>c.path==='/interaction/process').body.audio,'data:audio/webm;base64,test');
+ elements.end.onclick();
+ const Recorder=context.MediaRecorder;context.MediaRecorder=class {static isTypeSupported(){return true;}constructor(){throw new Error('Unsupported recorder');}};elements.mic.onclick();await settle();assert.ok(tracks.every(t=>t.stopped));assert.equal(elements.mic.disabled,false);context.MediaRecorder=Recorder;
+ console.log('PASS delayed recording cancellation, audio retry after failure, constructor cleanup');
+ console.log('PASS server recording submission, microphone-off, devices-off, session-end, pending permission cancellation');
  console.log('All dashboard control tests passed (simulated browser).');
 })().catch(e=>{console.error(e);process.exitCode=1;});
 

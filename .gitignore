@@ -8,3 +8,4 @@ wandb/
 backend/models/
 data/speech_features/
 data/speech_records.jsonl
+.rocketride/
