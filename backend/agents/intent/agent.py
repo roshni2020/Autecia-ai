@@ -160,6 +160,13 @@ def run(p: Perception, memories: list[MemoryHit], suggestion_count: int = 3) -> 
     texts = [t.strip()[:1].upper() + t.strip()[1:] for t in texts if t.strip()]
     texts = [t if t[-1] in ".?!" else t + "." for t in texts]
     texts = _dedupe(texts)
+    # A suggestion must complete the thought: drop restatements that add no
+    # content word beyond what was said ("Can you get the blue thing?" for
+    # "can you get... blue thing...").
+    said = set(content_words(p.transcript)) | MODIFIERS
+    completing = [t for t in texts if set(content_words(t)) - said]
+    if len(completing) >= 2:
+        texts = completing
     if len(texts) < 2:
         texts = _dedupe(texts + _offline(p, memories, 4))[:max(2, n)]
 

@@ -195,8 +195,10 @@ def _feedback(interaction_id: str, accepted: bool, confirmed_text: str | None, n
         sp = obs.get("speech") or {}
         summary = (f"{sp['vad']['pause_count']} pause(s), "
                    f"{'fragmented' if sp.get('fragmented') else 'fluent'}") if sp else ""
+        # The confirmed sentence is what the user MEANT: always a success for that
+        # memory. The +/-1 reward belongs to the policy (it scored the shown action).
         memory.add_memory(con, user_id, obs["transcript"], obs["visual_summary"],
-                          confirmed, reward, utterance_embedding=obs.get("utterance_embedding"),
+                          confirmed, 1, utterance_embedding=obs.get("utterance_embedding"),
                           speech_summary=summary)
 
     from .schemas import Perception

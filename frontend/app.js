@@ -519,7 +519,7 @@ async function sendFeedback(fb) {
   if (r.reward <= 0) companion.say(r.speak ? "learned" : "none_fit");
   renderImprovement(r);
   renderAgents(last.trace_summary, r.reflection);
-  $("sendCare").disabled = !r.speak;
+  $("sendCare").disabled = !r.speak || !window.__slackReady;
   if (r.speak) {
     confirmed = r.speak;
     $("confirmedLabel").textContent = "Confirmed message:"; $("confirmedText").textContent = confirmed;
@@ -667,6 +667,8 @@ async function loadEval() {
     const st = await api("/api/status");
     if (!st.integrations.elevenlabs) $("speak").title = "Browser voice (no ElevenLabs key set)";
     serverASR = !!(st.speech && st.speech.enabled && st.speech.whisper && st.speech.ffmpeg);
+    window.__slackReady = !!st.integrations.slack;
+    if (!window.__slackReady) $("sendCare").title = "Caregiver Slack not configured on this server";
     $("mic").title = serverASR ? `Server speech recognition (Whisper ${st.speech.whisper_model})` : "Browser speech recognition";
   } catch { notify("Backend not reachable. Start it with: python -m uvicorn backend.main:app"); }
   if (localStorage.getItem("echoloop_onboarded")) {

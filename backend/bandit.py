@@ -53,8 +53,11 @@ class Policy:
         self.updates += 1
         self.version += 1
 
-    def prefer(self, chosen: dict, shown: dict, alpha: float = ALPHA) -> None:
-        """Supervised preference step: chosen should outrank what we showed."""
+    def prefer(self, chosen: dict, shown: dict, alpha: float = ALPHA * 2.5) -> None:
+        """Supervised preference step: chosen should outrank what we showed.
+
+        An explicit correction is the highest-quality signal we get (spec §4), so
+        it moves the policy further than a bare +1/-1 reward."""
         self.w = self.w + alpha * (vec(chosen) - vec(shown))
         self.updates += 1
         self.version += 1
