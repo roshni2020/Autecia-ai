@@ -30,7 +30,7 @@ def _conversation(session_id: str, user_id: str):
         if len(_conversations) >= MAX_CONVERSATIONS:
             _conversations.pop(next(iter(_conversations)))
         conv = weave.start_conversation(
-            agent_name="echoloop", conversation_id=session_id,
+            agent_name="echoloop", conversation_id=f"{session_id}-{int(time.time() * 1000)}",
             conversation_name=f"{user_id} · {session_id}",
             attributes={"user_id": user_id, "app": "echoloop"})
         _conversations[session_id] = conv
@@ -112,6 +112,15 @@ def tool_span(t, name: str, arguments: dict, result) -> None:
         tool.end()
     except Exception as e:
         print(f"[agent_trace] tool span: {e}")
+
+
+def close(session_id: str) -> None:
+    """End the session's conversation so the dashboard shows it; the next request
+    of the same session opens a fresh one under the same conversation name."""
+    conv = _conversations.pop(session_id, None)
+    if conv is not None:
+        with contextlib.suppress(Exception):
+            conv.end()
 
 
 def _short(x, limit: int = 4000) -> str:

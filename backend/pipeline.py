@@ -196,6 +196,7 @@ def feedback(con, fb: FeedbackReq, learn: bool = True, remember: bool = True) ->
             import weave
             t.record(output_messages=[weave.Message(role="assistant",
                                                     content=f"{refl['failure_type']}: {refl['recommendation']}")])
+    agent_trace.close(row["session_id"] or fb.interaction_id)
 
     record = {"interaction_id": fb.interaction_id, "accepted": fb.accepted,
               "rejected": not fb.accepted, "confirmed_text": confirmed, "reward": reward,
