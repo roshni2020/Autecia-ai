@@ -84,7 +84,7 @@ def analyze_audio(data: bytes, suffix: str = ".webm", transcript_hint: str = "")
             if ni is not None:
                 providers["asr"] = f"faster-whisper:{ni['asr_model']} (neurointent)"
                 providers["prosody"] = "opensmile:GeMAPSv01b (neurointent)"
-                providers["text_encoder"] = "roberta-large (neurointent)"
+                providers["text_encoder"] = f"{ni.get('text_model', 'roberta-large')} (neurointent)"
                 transcript = ni["transcript"]
                 words = [WordTimestamp(**w) for w in ni["words"]]
                 segs = [SpeechSegment(**s) for s in ni["segments"]]

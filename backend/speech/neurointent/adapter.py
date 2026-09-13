@@ -103,6 +103,7 @@ def analyze(wav_path: Path, transcript_override: str | None = None) -> dict | No
     with torch.no_grad():
         cls_emb = m["roberta"](**inputs).last_hidden_state[:, 0, :]        # [1, 1024]
     out["cls"] = cls_emb.squeeze(0).cpu().numpy().astype(np.float32)
+    out["text_model"] = getattr(getattr(m["roberta"], "config", None), "_name_or_path", "roberta-large")
     # 4. FusionLayer content/prosody representation (their forward; logits ignored)
     if m["fusion"] is not None:
         prosody_t = torch.tensor(prosody_np).unsqueeze(0).to(device)
