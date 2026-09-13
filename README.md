@@ -7,6 +7,7 @@
 Built by **Roshni Kobula** (roshnikobula2020@gmail.com), **Ali Amjad** (ali.amjad52114@gmail.com) and **Rikin Shah** (rshah88@asu.edu) for the Multi-App AI Agent Hackathon (Lemma × Comma Capital, Sept 13 2026).
 
 - Repository: https://github.com/roshni2020/Autecia-ai
+- **Live app:** https://auteciia.vercel.app (hosted light mode: browser speech recognition, no Slack; full stack runs locally per §03)
 - Demo video (1:23): https://github.com/roshni2020/Autecia-ai/blob/main/docs/EchoLoop_demo.mp4
 - Technical deep-dive: [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
 
