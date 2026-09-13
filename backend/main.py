@@ -173,6 +173,20 @@ def forget(user_id: str, req: ForgetReq):
     return {"deleted": memory.forget(con, user_id, req.confirmed_text)}
 
 
+@app.get("/api/evaluation/curves")
+def evaluation_curves():
+    """Per-turn top-1 accuracy per configuration (from eval_curves.csv)."""
+    import csv
+    p = Path(__file__).resolve().parent.parent / "data" / "eval_curves.csv"
+    if not p.exists():
+        raise HTTPException(404, "no curves yet — run: python -m eval.run_eval")
+    out: dict[str, list] = {}
+    with p.open(encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            out.setdefault(r["configuration"], []).append([int(r["turn_bucket"]), float(r["top1_accuracy"])])
+    return out
+
+
 @app.get("/api/evaluation")
 def evaluation():
     """Latest offline evaluation report (run: python -m eval.run_eval)."""

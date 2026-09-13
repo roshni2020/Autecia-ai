@@ -71,6 +71,17 @@ def _referents(p: Perception, memories: list[MemoryHit], cues: list[str]) -> lis
     return sorted(out.items(), key=lambda kv: -kv[1])[:4]
 
 
+def _dedupe(texts: list[str]) -> list[str]:
+    """Drop near-duplicates ('go to bathroom' vs 'go to the bathroom')."""
+    seen, uniq = set(), []
+    for t in texts:
+        k = " ".join(w for w in re.findall(r"[a-z']+", t.lower()) if w not in {"the", "a", "an", "my", "to", "please"})
+        if k and k not in seen:
+            seen.add(k)
+            uniq.append(t)
+    return uniq
+
+
 def _carrier(fragment: str) -> str:
     for pat, tmpl in CARRIERS:
         if re.search(pat, fragment, re.I):
@@ -97,13 +108,7 @@ def _offline(p: Perception, memories: list[MemoryHit], n: int) -> list[str]:
     for phrase in phrase_bank():  # functional fallbacks that share a cue word
         if any(c in phrase.lower() for c in cues):
             texts.append(phrase)
-    seen, uniq = set(), []
-    for t in texts:
-        k = t.lower().strip()
-        if k not in seen:
-            seen.add(k)
-            uniq.append(t)
-    return uniq[:n]
+    return _dedupe(texts)[:n]
 
 
 LAST_PROVIDER = {"name": "offline-templates"}
@@ -154,6 +159,9 @@ def run(p: Perception, memories: list[MemoryHit], suggestion_count: int = 3) -> 
     # Tidy for speech: capital first letter, one terminal mark. Wording is untouched.
     texts = [t.strip()[:1].upper() + t.strip()[1:] for t in texts if t.strip()]
     texts = [t if t[-1] in ".?!" else t + "." for t in texts]
+    texts = _dedupe(texts)
+    if len(texts) < 2:
+        texts = _dedupe(texts + _offline(p, memories, 4))[:max(2, n)]
 
     cues = set(content_words(p.transcript))
     cands = []

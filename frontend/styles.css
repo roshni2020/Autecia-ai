@@ -258,3 +258,14 @@ dialog textarea{width:100%;border:1px solid var(--line);border-radius:10px;paddi
 .avatar-pick input{flex:1;border:1px solid var(--line);border-radius:8px;padding:5px 8px;font-size:.78rem}
 .status-chip.rec{color:var(--red)}
 .status-chip.rec [data-icon]{animation:echo-antenna 1s infinite}
+
+/* polish */
+.candidate .body{flex:1;display:flex;flex-direction:column;gap:2px;min-width:0}
+.candidate .text{font-size:1.05rem}
+.candidate small{white-space:normal}
+.candidate small b{color:var(--violet);font-weight:600}
+.eval-charts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin:14px 0}
+.eval-charts figure{margin:0;border:1px solid var(--line);border-radius:12px;padding:12px}
+.eval-charts figcaption{font-size:.8rem;color:var(--muted);margin-bottom:6px}
+.eval-charts svg{width:100%;height:auto;display:block}
+@media (max-width:900px){.eval-charts{grid-template-columns:1fr}}

@@ -453,8 +453,8 @@ function renderCandidates() {
   const d = last.candidate_detail;
   $("cands").innerHTML = d.map((c, i) =>
     `<button class="candidate ${i === selected ? "selected" : ""}" role="radio" aria-checked="${i === selected}" data-i="${i}">
-       <span class="radio"></span><span class="text">${esc(c.text)}</span>
-       <small>${c.features.judgment ? `System One ${pct(c.features.judgment)} · ` : ""}memory ${pct(c.memory_similarity)} · visual ${pct(c.visual_support)}</small></button>`).join("") +
+       <span class="radio"></span><span class="body"><span class="text">${esc(c.text)}</span>
+       <small>${c.features.judgment ? `<b>System One ${pct(c.features.judgment)}</b> · ` : ""}memory ${pct(c.memory_similarity)} · visual ${pct(c.visual_support)}${c.features.speech ? ` · speech ${pct(c.features.speech)}` : ""}</small></span></button>`).join("") +
     `<button class="candidate none" id="noneBtn"><span class="radio"></span><span class="text">None of these / Edit message</span><span data-icon="edit"></span></button>`;
   document.querySelectorAll(".candidate[data-i]").forEach((b) => b.addEventListener("click", () => { selected = +b.dataset.i; renderCandidates(); }));
   $("noneBtn").addEventListener("click", () => openEdit(""));
@@ -614,7 +614,31 @@ async function loadEval() {
   try { r = await api("/api/evaluation"); }
   catch { $("eval").innerHTML = `<p class="muted">No report yet — run <code>python -m eval.run_eval</code>.</p>`; return; }
   const a = r.ablations, best = a[a.length - 1], frozen = a[a.length - 2];
+  const bars = (() => {
+    const W = 520, H = 30 * a.length + 20, max = Math.max(...a.map((x) => x.top1)) || 1;
+    return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Top-1 accuracy by configuration">` +
+      a.map((x, i) => { const y = 10 + i * 30, w = Math.round(300 * x.top1 / max), last = i === a.length - 1;
+        return `<text x="0" y="${y + 14}" font-size="11" fill="#6b7390">${esc(x.name.replace(/^\d+\. /, "").slice(0, 34))}</text>
+                <rect x="200" y="${y}" width="${w}" height="18" rx="4" fill="${last ? "#1f9d63" : "#2f6bff"}" opacity="${last ? 1 : 0.75}"/>
+                <text x="${206 + w}" y="${y + 14}" font-size="11" fill="#1d2340">${pct(x.top1)}</text>`; }).join("") + `</svg>`;
+  })();
+  let curves = "";
+  try {
+    const c = await api("/api/evaluation/curves");
+    const names = Object.keys(c), W = 520, H = 220, L = 34, B = 26;
+    const xs = [...new Set(names.flatMap((n) => c[n].map((p) => p[0])))].sort((p, q) => p - q);
+    const xmax = Math.max(...xs) || 1, colors = ["#c9d3f5", "#a9b8f0", "#8fa4ff", "#7b5cff", "#5b7cff", "#2f6bff", "#e08a12", "#1f9d63"];
+    const X = (t) => L + (t / xmax) * (W - L - 8), Y = (v) => H - B - v * (H - B - 10);
+    curves = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Top-1 accuracy over interactions">
+      <line x1="${L}" y1="${Y(0)}" x2="${W - 8}" y2="${Y(0)}" stroke="#e3e8f6"/>
+      ${[0, .25, .5].map((v) => `<line x1="${L}" y1="${Y(v)}" x2="${W - 8}" y2="${Y(v)}" stroke="#eef1f9"/><text x="0" y="${Y(v) + 4}" font-size="10" fill="#6b7390">${pct(v)}</text>`).join("")}
+      ${names.map((n, i) => `<polyline fill="none" stroke="${colors[i % colors.length]}" stroke-width="${i === names.length - 1 ? 3 : 1.5}" points="${c[n].map((p) => `${X(p[0])},${Y(p[1])}`).join(" ")}"/>`).join("")}
+      <text x="${W / 2}" y="${H - 6}" font-size="10" fill="#6b7390" text-anchor="middle">interactions seen per user →</text>
+    </svg>`;
+  } catch { curves = ""; }
   $("eval").innerHTML =
+    `<div class="eval-charts"><figure><figcaption>Top-1 accuracy by configuration</figcaption>${bars}</figure>` +
+    (curves ? `<figure><figcaption>Learning curve — accuracy vs interactions (green = full system)</figcaption>${curves}</figure>` : "") + `</div>` +
     `<div class="stat-grid">
       <div class="stat"><small>Top-1 accuracy</small><strong>${pct(best.top1)}</strong><em>${(r.personalization_gain * 100 >= 0 ? "+" : "")}${(r.personalization_gain * 100).toFixed(1)} pts from learning</em></div>
       <div class="stat"><small>Top-3 accuracy</small><strong>${pct(best.top3)}</strong></div>
