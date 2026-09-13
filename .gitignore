@@ -5,3 +5,6 @@ data/echoloop.db
 data/traces.jsonl
 wandb/
 .venv/
+backend/models/
+data/speech_features/
+data/speech_records.jsonl

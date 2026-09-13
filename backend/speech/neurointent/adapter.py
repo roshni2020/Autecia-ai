@@ -36,13 +36,16 @@ def load_models() -> dict | None:
         from faster_whisper import WhisperModel
         from transformers import RobertaModel, RobertaTokenizer
         device = "cuda" if torch.cuda.is_available() else "cpu"
+        # Their loader fixes roberta-large (1.4 GB). Without the checkpoint the CLS size
+        # is free, so a smaller RoBERTa can stand in (NEUROINTENT_TEXT_MODEL=roberta-base).
+        text_model = os.getenv("NEUROINTENT_TEXT_MODEL", "roberta-large")
         return {"fusion": None,
                 "smile": opensmile.Smile(feature_set=opensmile.FeatureSet.GeMAPSv01b,
                                          feature_level=opensmile.FeatureLevel.Functionals),
                 "whisper": WhisperModel(os.getenv("WHISPER_MODEL", "base"), device=device,
                                         compute_type="float16" if device == "cuda" else "int8"),
-                "tokenizer": RobertaTokenizer.from_pretrained("roberta-large"),
-                "roberta": RobertaModel.from_pretrained("roberta-large").eval(),
+                "tokenizer": RobertaTokenizer.from_pretrained(text_model),
+                "roberta": RobertaModel.from_pretrained(text_model).eval(),
                 "device": device}
     except Exception as e:
         print(f"[neurointent] models unavailable: {e}")
